@@ -1,0 +1,441 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ./sessions:/app/sessions
+    environment:
+      - DATABASE_URL=sqlite:///data/digikala_sales.db
+      - GMAIL_USERNAME=${GMAIL_USERNAME}
+      - GMAIL_PASSWORD=${GMAIL_PASSWORD}
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - digikala-network
+
+  # Frontend Next.js
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    command: npm run dev
+    networks:
+      - digikala-network
+
+networks:
+  digikala-network:
+    driver: bridge
+
+---
+# backend/Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# نصب dependencies سیستمی
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# کپی requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# کپی کدها
+COPY . .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+---
+# frontend/Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# کپی package files
+COPY package*.json ./
+RUN npm install
+
+# کپی کدها
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]
+
+---
+# .dockerignore (برای backend)
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv
+*.db
+*.sqlite3
+.env
+.vscode
+.idea
+*.log
+
+---
+# .dockerignore (برای frontend)
+node_modules/
+.next/
+out/
+.env
+.env.local
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+---
+# .env.example
+# کپی کنید به .env و مقادیر را پر کنید
+
+# Gmail برای دریافت OTP
+GMAIL_USERNAME=your_email@gmail.com
+GMAIL_PASSWORD=your_app_password
+
+# KDE Connect
+DK_KEEP_BROWSER_ON_ERROR=0
+DEVICE_ID=8840ef7242ad4049afc617c52ecb5f57
+
+# Database
+DATABASE_URL=sqlite:///data/digikala_sales.db
+
+# دیجی‌کالا
+COMPANY_NAME=تجارت دریای آرام
+
+---
+# Makefile - دستورات سریع
+.PHONY: help setup migrate run stop logs clean
+
+help:
+	@echo "📦 دستورات موجود:"
+	@echo "  make setup    - نصب dependencies و setup اولیه"
+	@echo "  make migrate  - انتقال داده‌های CSV به SQLite"
+	@echo "  make run      - اجرای کل پروژه با Docker"
+	@echo "  make stop     - توقف containers"
+	@echo "  make logs     - مشاهده logs"
+	@echo "  make clean    - پاکسازی containers و volumes"
+
+setup:
+	@echo "🚀 در حال نصب dependencies..."
+	cd backend && pip install -r requirements.txt
+	cd frontend && npm install
+	@echo "✅ نصب کامل شد!"
+
+migrate:
+	@echo "🔄 در حال انتقال داده‌ها از CSV به SQLite..."
+	python scripts/migrate_csv_to_sqlite.py
+	@echo "✅ انتقال داده‌ها کامل شد!"
+
+run:
+	@echo "🚀 در حال اجرای پروژه..."
+	docker-compose up -d
+	@echo "✅ پروژه در حال اجرا است!"
+	@echo "   Frontend: http://localhost:3000"
+	@echo "   Backend API: http://localhost:8000"
+	@echo "   API Docs: http://localhost:8000/docs"
+
+stop:
+	@echo "⏸️  در حال توقف containers..."
+	docker-compose down
+	@echo "✅ Containers متوقف شدند"
+
+logs:
+	docker-compose logs -f
+
+clean:
+	@echo "🗑️  در حال پاکسازی..."
+	docker-compose down -v
+	@echo "✅ پاکسازی کامل شد!"
+
+---
+# README.md
+# 🚀 سیستم مدیریت سفارشات دیجی‌کالا v2.0
+
+## ویژگی‌ها
+
+### 🎯 بخش فروش (فعلی)
+- ✅ همگام‌سازی خودکار با API دیجی‌کالا
+- ✅ مدیریت سفارشات با فیلترهای پیشرفته
+- ✅ ثبت کدهای رهگیری از PDF
+- ✅ ارسال خودکار پیامک با KDE Connect
+- ✅ تولید برچسب‌های پستی
+- ✅ گزارشات و آمار تحلیلی
+- ✅ داشبورد زنده با نمودارها
+
+### 🔮 آینده
+- 📦 بخش انبارداری
+- 💰 بخش حسابداری
+- 👥 مدیریت چند کاربره
+- 🔔 نوتیفیکیشن Real-time
+
+## 📋 پیش‌نیازها
+
+- Docker & Docker Compose
+- یا: Python 3.11+ و Node.js 20+
+
+## ⚡ نصب سریع با Docker
+
+```bash
+# 1. Clone پروژه
+git clone https://github.com/yourusername/digikala-management-v2.git
+cd digikala-management-v2
+
+# 2. تنظیم environment variables
+cp .env.example .env
+# مقادیر را در .env ویرایش کنید
+
+# 3. انتقال داده‌های موجود
+make migrate
+
+# 4. اجرای پروژه
+make run
+```
+
+پروژه اجرا شد! 🎉
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+
+## 🛠️ نصب دستی (بدون Docker)
+
+### Backend:
+```bash
+cd backend
+pip install -r requirements.txt
+python ../scripts/migrate_csv_to_sqlite.py
+uvicorn main:app --reload
+```
+
+### Frontend:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## 📚 مستندات
+
+### API Endpoints
+
+#### سفارشات
+- `GET /api/orders` - لیست سفارشات با فیلتر
+- `GET /api/orders/{id}` - جزئیات سفارش
+- `POST /api/orders/sync` - همگام‌سازی با دیجی‌کالا
+- `PUT /api/orders/{id}` - به‌روزرسانی سفارش
+
+#### رهگیری
+- `POST /api/tracking/upload-pdf` - آپلود PDF رسید
+- `POST /api/tracking/send/{id}` - ارسال کد به API دیجی‌کالا
+
+#### پیامک
+- `POST /api/sms/send` - ارسال پیامک
+- `GET /api/sms/logs` - تاریخچه پیامک‌ها
+
+#### گزارشات
+- `GET /api/stats` - آمار کلی
+- `GET /api/reports/sales` - گزارش فروش
+- `GET /api/reports/cities` - توزیع جغرافیایی
+
+### ساختار دیتابیس
+
+**جداول اصلی:**
+- `orders` - سفارشات اصلی
+- `order_items` - اقلام سفارش
+- `sms_logs` - لاگ ارسال پیامک
+- `sender_profiles` - پروفایل‌های فرستنده
+
+**روابط:**
+- یک سفارش → چند آیتم (One-to-Many)
+- یک سفارش → چند لاگ پیامک (One-to-Many)
+
+## 🎨 تکنولوژی‌ها
+
+### Frontend
+- **Next.js 14** - React Framework
+- **TypeScript** - Type Safety
+- **Tailwind CSS** - Styling
+- **shadcn/ui** - UI Components
+- **React Query** - Data Fetching
+- **Recharts** - نمودارها
+
+### Backend
+- **FastAPI** - Python Web Framework
+- **SQLAlchemy** - ORM
+- **Pydantic** - Data Validation
+- **SQLite** - Database
+- **Uvicorn** - ASGI Server
+
+## 📂 ساختار فایل‌ها
+
+```
+digikala-management-v2/
+├── backend/
+│   ├── main.py              # API اصلی
+│   ├── database/
+│   │   └── models.py        # مدل‌های دیتابیس
+│   ├── routers/             # مسیرهای API
+│   ├── services/            # Business Logic
+│   └── utils/               # ماژول‌های کمکی (بدون تغییر)
+├── frontend/
+│   ├── app/                 # صفحات Next.js
+│   ├── components/          # کامپوننت‌های React
+│   └── lib/                 # کتابخانه‌های کمکی
+├── data/                    # دیتابیس SQLite
+├── scripts/                 # اسکریپت‌های مهاجرت
+└── docker-compose.yml       # Docker setup
+```
+
+## 🔧 تنظیمات
+
+### Gmail Setup (برای OTP)
+1. فعال‌سازی 2-Step Verification
+2. ساخت App Password
+3. قرار دادن در `.env`:
+```env
+GMAIL_USERNAME=your_email@gmail.com
+GMAIL_PASSWORD=your_app_password
+```
+
+### KDE Connect Setup
+1. نصب KDE Connect روی گوشی و کامپیوتر
+2. Pair کردن دستگاه‌ها
+3. یافتن Device ID:
+```bash
+kdeconnect-cli --list-devices
+```
+4. قرار دادن در `.env`:
+```env
+DEVICE_ID=your_device_id
+```
+
+## 🚀 دستورات مفید
+
+```bash
+# مشاهده logs
+make logs
+
+# توقف پروژه
+make stop
+
+# پاکسازی کامل
+make clean
+
+# دسترسی به shell backend
+docker-compose exec backend bash
+
+# دسترسی به shell frontend
+docker-compose exec frontend sh
+
+# مشاهده دیتابیس
+sqlite3 data/digikala_sales.db
+```
+
+## 🐛 عیب‌یابی
+
+### خطای اتصال به API دیجی‌کالا
+```bash
+# بررسی کوکی‌ها
+ls -la sessions/digikala_cookies.json
+
+# اجرای مجدد لاگین
+python scripts/improved_login.py
+```
+
+### خطای ارسال پیامک
+```bash
+# بررسی وضعیت KDE Connect
+kdeconnect-cli --ping
+
+# تست ارسال
+kdeconnect-cli --device YOUR_ID --send-sms "تست" --destination 09123456789
+```
+
+### خطای دیتابیس
+```bash
+# بررسی دیتابیس
+python scripts/check_database.py
+
+# مهاجرت مجدد
+python scripts/migrate_csv_to_sqlite.py
+```
+
+## 📈 بهبودهای آینده
+
+### فاز 2 - بخش انبار (2 ماه)
+- [ ] مدیریت موجودی محصولات
+- [ ] سیستم ورود و خروج کالا
+- [ ] بارکد اسکنر
+- [ ] هشدار کمبود موجودی
+- [ ] گزارش گردش انبار
+
+### فاز 3 - بخش حسابداری (3 ماه)
+- [ ] صدور فاکتور
+- [ ] ثبت هزینه‌ها و درآمدها
+- [ ] گزارشات مالی
+- [ ] حساب‌های بانکی
+- [ ] مالیات و اظهارنامه
+
+### فاز 4 - ویژگی‌های پیشرفته (ongoing)
+- [ ] Multi-user با Authentication (JWT)
+- [ ] Role-based Access Control
+- [ ] نوتیفیکیشن Real-time (WebSocket)
+- [ ] Export گزارشات پیشرفته (Excel, PDF)
+- [ ] Dashboard تحلیلی با AI
+- [ ] اپلیکیشن موبایل (React Native)
+- [ ] پشتیبانی از PostgreSQL
+- [ ] Cache با Redis
+- [ ] Queue برای پردازش پس‌زمینه (Celery)
+
+## 🤝 مشارکت
+
+برای مشارکت در پروژه:
+
+1. Fork کنید
+2. یک branch جدید بسازید
+3. تغییرات خود را commit کنید
+4. Push به branch خود
+5. یک Pull Request باز کنید
+
+## 📄 لایسنس
+
+این پروژه تحت لایسنس MIT منتشر شده است.
+
+## 💬 پشتیبانی
+
+- 📧 Email: support@example.com
+- 💬 Telegram: @digikala_support
+- 🐛 Issues: GitHub Issues
+
+---
+
+**ساخته شده با ❤️ برای فروشندگان دیجی‌کالا**

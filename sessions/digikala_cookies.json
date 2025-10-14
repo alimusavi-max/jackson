@@ -1,0 +1,130 @@
+[
+  {
+    "domain": ".digikala.com",
+    "expiry": 1794394707,
+    "httpOnly": false,
+    "name": "_sp_id.13cb",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "c6c4c8c9-4106-4df2-bd36-b83ac55a0b52.1759834690.1.1759834707..af0c441a-e0d5-4aba-b65f-10bb48c3b1ff..58501305-ce67-4f34-9ccb-6b87525ee21a.1759834689606.7"
+  },
+  {
+    "domain": "seller.digikala.com",
+    "expiry": 1759838306,
+    "httpOnly": true,
+    "name": "seller_api_otp_token",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": true,
+    "value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzM4NCJ9.eyJ0eXBlIjoib3RwIiwidG9rZW5faWQiOjI5MTE0MjU0LCJzZWxsZXJfaWQiOm51bGwsInZlcmlmaWVkX2J5X290cCI6ImplYWxpbXVzYXZpQGdtYWlsLmNvbSIsImV4cCI6MTc2MTU2MjcwNn0.8rYIzCoP5DK9wDFDpVkL7hqZtuPmlZSkWUUrjenGUoMz9xXg4QvYo66yK3lU0gw-"
+  },
+  {
+    "domain": ".digikala.com",
+    "expiry": 1791370690,
+    "httpOnly": false,
+    "name": "_ym_d",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "1759834691"
+  },
+  {
+    "domain": "seller.digikala.com",
+    "expiry": 1761562706,
+    "httpOnly": true,
+    "name": "seller_api_access_token",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": true,
+    "value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzM4NCJ9.eyJ0b2tlbl9pZCI6MjkxMTQyNTUsInNlbGxlcl9pZCI6NjY1OTQ0LCJwYXlsb2FkIjp7InVzZXJuYW1lIjoiamVhbGltdXNhdmlAZ21haWwuY29tIiwicmVnaXN0ZXJfcGhvbmUiOiI5ODkwNDY2MDA2MTAiLCJlbWFpbCI6ImplYWxpbXVzYXZpQGdtYWlsLmNvbSIsImJ1c2luZXNzX25hbWUiOiJcdTA2MzRcdTA2MmVcdTA2MzVcdTA2Y2MgXHUwNjJmXHUwNjMxXHUwNmNjXHUwNjI3XHUwNmNjIFx1MDYyMlx1MDYzMVx1MDYyN1x1MDY0NSIsImZpcnN0X25hbWUiOiJcdTA2MzNcdTA2NGFcdTA2MmZcdTA2MzlcdTA2NDRcdTA2NGEiLCJsYXN0X25hbWUiOiJcdTA2NDVcdTA2NDhcdTA2MzNcdTA2NDhcdTA2NGEiLCJjb21wYW55X25hbWUiOm51bGwsInZlcmlmaWVkX2J5X290cCI6WyJqZWFsaW11c2F2aUBnbWFpbC5jb20iXX0sImV4cCI6MTc2MTU2MjcwNn0.2LsbVkM1XYmz_dxjkFgXYYixsm8ZuJTAxsKUUK9DX5sCPTBcT4hrG7RgxENLDZ2i"
+  },
+  {
+    "domain": "seller.digikala.com",
+    "expiry": 1759836511,
+    "httpOnly": true,
+    "name": "tracker_session",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "8sQk6CJ"
+  },
+  {
+    "domain": ".digikala.com",
+    "expiry": 1791370690,
+    "httpOnly": false,
+    "name": "_clck",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "1tl9a7t%5E2%5Efzy%5E0%5E2106"
+  },
+  {
+    "domain": "seller.digikala.com",
+    "expiry": 1794394711,
+    "httpOnly": true,
+    "name": "tracker_glob_new",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "6Q8O9bx"
+  },
+  {
+    "domain": ".digikala.com",
+    "expiry": 1759906690,
+    "httpOnly": false,
+    "name": "_ym_isad",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "2"
+  },
+  {
+    "domain": ".digikala.com",
+    "expiry": 1759921107,
+    "httpOnly": false,
+    "name": "_clsk",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "cjy6of%5E1759834707554%5E3%5E0%5Ei.clarity.ms%2Fcollect"
+  },
+  {
+    "domain": ".digikala.com",
+    "expiry": 1791370690,
+    "httpOnly": false,
+    "name": "_ym_uid",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "1759834691661256360"
+  },
+  {
+    "domain": ".digikala.com",
+    "expiry": 1759836507,
+    "httpOnly": false,
+    "name": "_sp_ses.13cb",
+    "path": "/",
+    "sameSite": "None",
+    "secure": true,
+    "value": "*"
+  },
+  {
+    "domain": "seller.digikala.com",
+    "httpOnly": false,
+    "name": "PHPSESSID",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "qmpmtoeuc224u3pkfdtmim9og1"
+  },
+  {
+    "domain": ".seller.digikala.com",
+    "httpOnly": false,
+    "name": "TS018d011a",
+    "path": "/",
+    "sameSite": "Lax",
+    "secure": false,
+    "value": "0102310591ac60e789d7b3946b301ea3809a143ba39c755898369f090f5df33312a9e319eab440a6d5bbf73fb24509fd6959f9050a"
+  }
+]

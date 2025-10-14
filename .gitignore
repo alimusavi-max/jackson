@@ -1,0 +1,11 @@
+﻿node_modules/
+.next/
+.next/cache/
+dist/
+build/
+*.log
+.env
+.DS_Store
+*.zip
+*.sqlite
+*.tmp
