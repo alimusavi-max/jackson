@@ -7,11 +7,10 @@ from typing import List, Optional
 import os
 import sys
 
-# اضافه کردن backend به path
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database.models import Order, OrderItem, SenderProfile, SMSLog, Base
-from routers import orders  # import کردن router
+from routers import orders
 
 # ==================== تنظیمات دیتابیس ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,14 +22,11 @@ print(f"🗄️  مسیر دیتابیس: {DB_PATH_ABS}")
 print(f"📁 فایل وجود دارد: {os.path.exists(DB_PATH_ABS)}")
 print(f"{'='*60}\n")
 
-# ایجاد engine
 engine = create_engine(f'sqlite:///{DB_PATH_ABS}', echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# ایجاد جداول
 Base.metadata.create_all(bind=engine)
 
-# تست اولیه
 def test_db():
     db = SessionLocal()
     try:
@@ -52,7 +48,6 @@ app = FastAPI(
     description=f"Database: {DB_PATH_ABS} | Orders: {initial_count}"
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -61,7 +56,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -136,10 +130,7 @@ def get_orders(
     search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """
-    🔥 دریافت لیست سفارشات - نسخه اصلاح شده
-    حالا تمام آیتم‌های سفارش رو برمی‌گردونه!
-    """
+    """🔥 دریافت لیست سفارشات - نسخه اصلاح شده با تعداد صحیح"""
     try:
         query = db.query(Order)
         
@@ -171,17 +162,17 @@ def get_orders(
         for order in orders:
             items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
             
-            # 🔥 محاسبه تعداد واقعی (مجموع quantity ها)
+            # 🔥 محاسبه صحیح تعداد کل (مجموع quantity های تمام آیتم‌ها)
             total_quantity = sum(item.quantity for item in items)
             total_amount = sum(item.price * item.quantity for item in items)
             
-            # 🔥 اضافه کردن لیست آیتم‌ها
+            # 🔥 لیست کامل محصولات با تعداد هر یک
             items_list = [
                 {
                     "id": item.id,
                     "product_title": item.product_title,
                     "product_code": item.product_code,
-                    "quantity": item.quantity,
+                    "quantity": item.quantity,  # تعداد هر محصول
                     "price": item.price,
                     "product_image": item.product_image
                 }
@@ -202,9 +193,9 @@ def get_orders(
                 "tracking_code": order.tracking_code,
                 "order_date_persian": order.order_date_persian or "",
                 "items_count": len(items),  # تعداد آیتم‌های منحصر به فرد
-                "total_quantity": total_quantity,  # 🔥 مجموع quantity ها
+                "total_quantity": total_quantity,  # 🔥 مجموع تعداد واقعی کالاها
                 "total_amount": total_amount,
-                "items": items_list  # 🔥 لیست کامل محصولات
+                "items": items_list  # 🔥 لیست کامل محصولات با quantity هر یک
             })
         
         return result
@@ -217,14 +208,17 @@ def get_orders(
     
 @app.get("/api/orders/{order_id}")
 def get_order_detail(order_id: int, db: Session = Depends(get_db)):
-    """جزئیات یک سفارش"""
+    """جزئیات یک سفارش با تعداد صحیح"""
+    from fastapi import HTTPException
+    
     order = db.query(Order).filter(Order.id == order_id).first()
     
     if not order:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="سفارش یافت نشد")
     
-    items = [
+    items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+    
+    items_list = [
         {
             "id": item.id,
             "product_title": item.product_title,
@@ -233,8 +227,11 @@ def get_order_detail(order_id: int, db: Session = Depends(get_db)):
             "price": item.price,
             "product_image": item.product_image
         }
-        for item in order.items
+        for item in items
     ]
+    
+    total_quantity = sum(item.quantity for item in items)
+    total_amount = sum(item.price * item.quantity for item in items)
     
     return {
         "id": order.id,
@@ -249,9 +246,10 @@ def get_order_detail(order_id: int, db: Session = Depends(get_db)):
         "postal_code": order.postal_code,
         "tracking_code": order.tracking_code,
         "order_date_persian": order.order_date_persian,
-        "items": items,
+        "items": items_list,
         "items_count": len(items),
-        "total_amount": sum(item["price"] * item["quantity"] for item in items)
+        "total_quantity": total_quantity,  # تعداد کل واقعی
+        "total_amount": total_amount
     }
 
 # ==================== اجرا ====================

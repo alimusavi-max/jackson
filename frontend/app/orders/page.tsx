@@ -26,12 +26,8 @@ interface Order {
   tracking_code: string | null
   order_date_persian: string
   items_count: number
-  total_quantity: number
+  total_quantity: number  // 🔥 تعداد کل واقعی
   total_amount: number
-  items: OrderItem[]
-}
-
-interface OrderDetail extends Order {
   items: OrderItem[]
 }
 
@@ -39,9 +35,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
-  const [orderDetails, setOrderDetails] = useState<Map<number, OrderDetail>>(new Map())
   const [loading, setLoading] = useState(true)
-  const [loadingDetails, setLoadingDetails] = useState<Set<number>>(new Set())
   
   const [filters, setFilters] = useState({
     search: '',
@@ -50,7 +44,8 @@ export default function OrdersPage() {
     status: 'all',
     has_tracking: 'all',
     has_address: 'all',
-    has_phone: 'all'
+    has_phone: 'all',
+    multi_item_only: false  // 🔥 فیلتر سفارشات چندقلمی
   })
 
   useEffect(() => {
@@ -75,27 +70,6 @@ export default function OrdersPage() {
     }
   }
 
-  const loadOrderDetails = async (orderId: number) => {
-    if (orderDetails.has(orderId)) {
-      return
-    }
-
-    setLoadingDetails(prev => new Set(prev).add(orderId))
-    
-    try {
-      const res = await ordersAPI.getById(orderId)
-      setOrderDetails(prev => new Map(prev).set(orderId, res.data))
-    } catch (error) {
-      console.error('خطا در دریافت جزئیات:', error)
-    } finally {
-      setLoadingDetails(prev => {
-        const next = new Set(prev)
-        next.delete(orderId)
-        return next
-      })
-    }
-  }
-
   const toggleRow = (orderId: number) => {
     const newExpanded = new Set(expandedRows)
     
@@ -103,7 +77,6 @@ export default function OrdersPage() {
       newExpanded.delete(orderId)
     } else {
       newExpanded.add(orderId)
-      loadOrderDetails(orderId)
     }
     
     setExpandedRows(newExpanded)
@@ -118,7 +91,8 @@ export default function OrdersPage() {
         order.order_code?.toLowerCase().includes(searchLower) ||
         order.customer_name?.toLowerCase().includes(searchLower) ||
         order.tracking_code?.toLowerCase().includes(searchLower) ||
-        order.customer_phone?.includes(filters.search)
+        order.customer_phone?.includes(filters.search) ||
+        order.items?.some(item => item.product_title?.toLowerCase().includes(searchLower))
       )
     }
 
@@ -152,6 +126,11 @@ export default function OrdersPage() {
       result = result.filter(order => !order.customer_phone || order.customer_phone === 'نامشخص')
     }
 
+    // 🔥 فیلتر سفارشات چندقلمی
+    if (filters.multi_item_only) {
+      result = result.filter(order => order.items_count > 1)
+    }
+
     setFilteredOrders(result)
   }
 
@@ -163,9 +142,14 @@ export default function OrdersPage() {
       status: 'all',
       has_tracking: 'all',
       has_address: 'all',
-      has_phone: 'all'
+      has_phone: 'all',
+      multi_item_only: false
     })
   }
+
+  // 🔥 آمار سفارشات چندقلمی
+  const multiItemOrders = orders.filter(o => o.items_count > 1).length
+  const totalItems = orders.reduce((sum, o) => sum + (o.total_quantity || 0), 0)
 
   const cities = Array.from(new Set(orders.map(o => o.city).filter(Boolean))).sort()
   const provinces = Array.from(new Set(orders.map(o => o.province).filter(Boolean))).sort()
@@ -182,12 +166,22 @@ export default function OrdersPage() {
                 <a href="/" className="text-2xl hover:text-blue-600 transition">←</a>
                 <h1 className="text-2xl font-bold text-gray-900">📋 مدیریت سفارشات</h1>
               </div>
-              <p className="text-gray-600 mt-1">
-                <span className="font-bold text-blue-600">{filteredOrders.length}</span> سفارش 
-                {filteredOrders.length !== orders.length && (
-                  <span className="text-gray-400"> از {orders.length} سفارش</span>
-                )}
-              </p>
+              <div className="flex gap-4 mt-2 text-sm">
+                <span className="text-gray-600">
+                  <span className="font-bold text-blue-600">{filteredOrders.length}</span> سفارش 
+                  {filteredOrders.length !== orders.length && (
+                    <span className="text-gray-400"> از {orders.length}</span>
+                  )}
+                </span>
+                <span className="text-gray-400">|</span>
+                <span className="text-orange-600">
+                  🎁 {multiItemOrders} سفارش چندقلمی
+                </span>
+                <span className="text-gray-400">|</span>
+                <span className="text-purple-600">
+                  📦 {totalItems} کالا
+                </span>
+              </div>
             </div>
             <div className="flex gap-3">
               <button 
@@ -223,7 +217,7 @@ export default function OrdersPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">جستجو</label>
               <input
                 type="text"
-                placeholder="کد سفارش، نام مشتری، تلفن، کد رهگیری..."
+                placeholder="کد سفارش، نام مشتری، تلفن، محصول..."
                 value={filters.search}
                 onChange={(e) => setFilters({...filters, search: e.target.value})}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -314,6 +308,21 @@ export default function OrdersPage() {
                 <option value="no">✗ بدون تلفن</option>
               </select>
             </div>
+
+            {/* 🔥 فیلتر جدید: سفارشات چندقلمی */}
+            <div className="flex items-end">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.multi_item_only}
+                  onChange={(e) => setFilters({...filters, multi_item_only: e.target.checked})}
+                  className="w-5 h-5 text-orange-600 rounded focus:ring-2 focus:ring-orange-500"
+                />
+                <span className="text-sm font-medium text-orange-700">
+                  🎁 فقط سفارشات چندقلمی ({multiItemOrders})
+                </span>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -348,26 +357,26 @@ export default function OrdersPage() {
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">وضعیت</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">کد رهگیری</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">محصولات</th>
+                    <th className="px-4 py-3 text-right font-semibold text-gray-700">تعداد کل</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">تاریخ</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredOrders.map((order, index) => {
                     const isExpanded = expandedRows.has(order.id)
-                    const details = orderDetails.get(order.id)
-                    const isLoadingDetail = loadingDetails.has(order.id)
-                    
-                    // 🔥 استفاده از items از خود order
                     const orderItems = order.items || []
                     const hasMultipleItems = orderItems.length > 1
                     
                     return (
                       <React.Fragment key={order.id}>
                         {/* ردیف اصلی */}
-                        <tr className={`border-b hover:bg-blue-50 transition ${hasMultipleItems ? 'bg-yellow-50' : ''}`}>
+                        <tr className={`border-b hover:bg-blue-50 transition cursor-pointer ${hasMultipleItems ? 'bg-yellow-50' : ''}`} onClick={() => toggleRow(order.id)}>
                           <td className="px-4 py-3">
                             <button
-                              onClick={() => toggleRow(order.id)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleRow(order.id)
+                              }}
                               className="text-gray-600 hover:text-blue-600 transition"
                             >
                               {isExpanded ? '▼' : '◀'}
@@ -406,8 +415,19 @@ export default function OrdersPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-bold">
-                              {order.items_count} عدد
+                            <div className="flex items-center justify-center gap-1">
+                              <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-bold">
+                                {order.items_count} قلم
+                              </span>
+                              {hasMultipleItems && (
+                                <span className="text-orange-600 text-lg" title="سفارش چندقلمی">🎁</span>
+                              )}
+                            </div>
+                          </td>
+                          {/* 🔥 نمایش تعداد کل واقعی */}
+                          <td className="px-4 py-3 text-center">
+                            <span className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-bold">
+                              {order.total_quantity || order.items_count} عدد
                             </span>
                           </td>
                           <td className="px-4 py-3 text-xs text-gray-600">
@@ -418,13 +438,8 @@ export default function OrdersPage() {
                         {/* ردیف جزئیات (منوی کشویی) */}
                         {isExpanded && (
                           <tr className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2">
-                            <td colSpan={9} className="px-4 py-4">
-                              {isLoadingDetail ? (
-                                <div className="text-center py-4">
-                                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                                  <p className="text-gray-600 mt-2 text-sm">در حال بارگذاری جزئیات...</p>
-                                </div>
-                              ) : (orderItems.length > 0 || details) ? (
+                            <td colSpan={10} className="px-4 py-4">
+                              {orderItems.length > 0 ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                   {/* اطلاعات تماس و آدرس */}
                                   <div className="space-y-3">
@@ -457,6 +472,11 @@ export default function OrdersPage() {
                                   <div>
                                     <h4 className="font-bold text-gray-900 flex items-center gap-2 mb-3">
                                       🛒 محصولات سفارش ({orderItems.length} قلم)
+                                      {hasMultipleItems && (
+                                        <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+                                          چندقلمی
+                                        </span>
+                                      )}
                                     </h4>
                                     
                                     <div className="space-y-2 max-h-80 overflow-y-auto">
@@ -471,11 +491,16 @@ export default function OrdersPage() {
                                             </div>
                                             <div className="flex items-center gap-4 text-xs text-gray-600 flex-wrap">
                                               <span className="font-mono">کد: {item.product_code}</span>
+                                              {/* 🔥 نمایش تعداد هر محصول */}
                                               <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-bold">
                                                 {item.quantity} عدد
                                               </span>
                                               <span className="font-bold text-green-700">
                                                 {item.price.toLocaleString('fa-IR')} تومان
+                                              </span>
+                                              {/* 🔥 جمع قیمت × تعداد */}
+                                              <span className="text-gray-500">
+                                                = {(item.price * item.quantity).toLocaleString('fa-IR')} تومان
                                               </span>
                                             </div>
                                           </div>
@@ -485,7 +510,17 @@ export default function OrdersPage() {
 
                                     {/* مجموع */}
                                     <div className="mt-3 bg-gradient-to-r from-green-100 to-emerald-100 p-4 rounded-lg">
-                                      <div className="flex items-center justify-between">
+                                      <div className="grid grid-cols-2 gap-4 text-sm mb-2">
+                                        <div>
+                                          <span className="text-gray-700">تعداد اقلام:</span>
+                                          <span className="font-bold text-purple-700 mr-2">{orderItems.length} قلم</span>
+                                        </div>
+                                        <div>
+                                          <span className="text-gray-700">تعداد کل:</span>
+                                          <span className="font-bold text-blue-700 mr-2">{order.total_quantity} عدد</span>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center justify-between border-t border-green-200 pt-2">
                                         <span className="font-bold text-gray-700">مجموع سفارش:</span>
                                         <span className="text-2xl font-bold text-green-700">
                                           {order.total_amount.toLocaleString('fa-IR')} تومان
