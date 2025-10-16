@@ -26,9 +26,9 @@ interface Order {
   tracking_code: string | null
   order_date_persian: string
   items_count: number
-  total_quantity: number // 🔥 جدید
+  total_quantity: number
   total_amount: number
-  items: OrderItem[] // 🔥 جدید
+  items: OrderItem[]
 }
 
 interface OrderDetail extends Order {
@@ -65,7 +65,7 @@ export default function OrdersPage() {
     try {
       setLoading(true)
       const res = await ordersAPI.getAll({ limit: 1000 })
-      console.log('📦 نمونه سفارش:', res.data[0]) // برای دیباگ
+      console.log('📦 نمونه سفارش:', res.data[0])
       setOrders(res.data)
     } catch (error) {
       console.error('خطا:', error)
@@ -424,7 +424,7 @@ export default function OrdersPage() {
                                   <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                                   <p className="text-gray-600 mt-2 text-sm">در حال بارگذاری جزئیات...</p>
                                 </div>
-                              ) : details ? (
+                              ) : (orderItems.length > 0 || details) ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                   {/* اطلاعات تماس و آدرس */}
                                   <div className="space-y-3">
@@ -434,33 +434,33 @@ export default function OrdersPage() {
                                     
                                     <div className="bg-white p-3 rounded-lg shadow-sm">
                                       <div className="text-xs text-gray-500 mb-1">استان</div>
-                                      <div className="font-medium text-gray-900">{details.province || 'نامشخص'}</div>
+                                      <div className="font-medium text-gray-900">{order.province || 'نامشخص'}</div>
                                     </div>
 
                                     <div className="bg-white p-3 rounded-lg shadow-sm">
                                       <div className="text-xs text-gray-500 mb-1">شماره تلفن</div>
-                                      <div className="font-mono text-gray-900" dir="ltr">{details.customer_phone || 'نامشخص'}</div>
+                                      <div className="font-mono text-gray-900" dir="ltr">{order.customer_phone || 'نامشخص'}</div>
                                     </div>
 
                                     <div className="bg-white p-3 rounded-lg shadow-sm">
                                       <div className="text-xs text-gray-500 mb-1">کد پستی</div>
-                                      <div className="font-mono text-gray-900">{details.postal_code || 'نامشخص'}</div>
+                                      <div className="font-mono text-gray-900">{order.postal_code || 'نامشخص'}</div>
                                     </div>
 
                                     <div className="bg-white p-3 rounded-lg shadow-sm">
                                       <div className="text-xs text-gray-500 mb-1">آدرس کامل</div>
-                                      <div className="text-gray-900 leading-relaxed">{details.full_address || 'نامشخص'}</div>
+                                      <div className="text-gray-900 leading-relaxed">{order.full_address || 'نامشخص'}</div>
                                     </div>
                                   </div>
 
                                   {/* محصولات سفارش */}
                                   <div>
                                     <h4 className="font-bold text-gray-900 flex items-center gap-2 mb-3">
-                                      🛒 محصولات سفارش ({details.items.length} قلم)
+                                      🛒 محصولات سفارش ({orderItems.length} قلم)
                                     </h4>
                                     
                                     <div className="space-y-2 max-h-80 overflow-y-auto">
-                                      {details.items.map((item, idx) => (
+                                      {orderItems.map((item, idx) => (
                                         <div key={item.id} className="bg-white p-3 rounded-lg shadow-sm flex items-start gap-3">
                                           <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold text-sm flex-shrink-0">
                                             {idx + 1}
@@ -469,7 +469,7 @@ export default function OrdersPage() {
                                             <div className="font-medium text-gray-900 text-sm leading-tight mb-1">
                                               {item.product_title}
                                             </div>
-                                            <div className="flex items-center gap-4 text-xs text-gray-600">
+                                            <div className="flex items-center gap-4 text-xs text-gray-600 flex-wrap">
                                               <span className="font-mono">کد: {item.product_code}</span>
                                               <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-bold">
                                                 {item.quantity} عدد
@@ -488,7 +488,7 @@ export default function OrdersPage() {
                                       <div className="flex items-center justify-between">
                                         <span className="font-bold text-gray-700">مجموع سفارش:</span>
                                         <span className="text-2xl font-bold text-green-700">
-                                          {details.total_amount.toLocaleString('fa-IR')} تومان
+                                          {order.total_amount.toLocaleString('fa-IR')} تومان
                                         </span>
                                       </div>
                                     </div>
