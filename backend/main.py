@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database.models import Order, OrderItem, SenderProfile, SMSLog, Base
-from routers import orders  # 👈 import کردن router
+from routers import orders  # import کردن router
 
 # ==================== تنظیمات دیتابیس ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -70,7 +70,7 @@ def get_db():
         db.close()
 
 # ==================== Include Routers ====================
-app.include_router(orders.router, prefix="/api", tags=["orders"])  # 👈 اضافه کردن router
+app.include_router(orders.router, prefix="/api", tags=["orders"])
 
 # ==================== Routes ====================
 @app.get("/")
@@ -136,7 +136,10 @@ def get_orders(
     search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """دریافت لیست سفارشات"""
+    """
+    🔥 دریافت لیست سفارشات - نسخه اصلاح شده
+    حالا تمام آیتم‌های سفارش رو برمی‌گردونه!
+    """
     try:
         query = db.query(Order)
         
@@ -167,8 +170,23 @@ def get_orders(
         result = []
         for order in orders:
             items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
-            items_count = sum(item.quantity for item in items)
+            
+            # 🔥 محاسبه تعداد واقعی (مجموع quantity ها)
+            total_quantity = sum(item.quantity for item in items)
             total_amount = sum(item.price * item.quantity for item in items)
+            
+            # 🔥 اضافه کردن لیست آیتم‌ها
+            items_list = [
+                {
+                    "id": item.id,
+                    "product_title": item.product_title,
+                    "product_code": item.product_code,
+                    "quantity": item.quantity,
+                    "price": item.price,
+                    "product_image": item.product_image
+                }
+                for item in items
+            ]
             
             result.append({
                 "id": order.id,
@@ -183,8 +201,10 @@ def get_orders(
                 "postal_code": order.postal_code or "",
                 "tracking_code": order.tracking_code,
                 "order_date_persian": order.order_date_persian or "",
-                "items_count": items_count,
-                "total_amount": total_amount
+                "items_count": len(items),  # تعداد آیتم‌های منحصر به فرد
+                "total_quantity": total_quantity,  # 🔥 مجموع quantity ها
+                "total_amount": total_amount,
+                "items": items_list  # 🔥 لیست کامل محصولات
             })
         
         return result

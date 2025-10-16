@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react'
 import { ordersAPI } from '@/lib/api'
 
-// ... the rest of your component code
 interface OrderItem {
   id: number
   product_title: string
@@ -27,7 +26,9 @@ interface Order {
   tracking_code: string | null
   order_date_persian: string
   items_count: number
+  total_quantity: number // 🔥 جدید
   total_amount: number
+  items: OrderItem[] // 🔥 جدید
 }
 
 interface OrderDetail extends Order {
@@ -64,6 +65,7 @@ export default function OrdersPage() {
     try {
       setLoading(true)
       const res = await ordersAPI.getAll({ limit: 1000 })
+      console.log('📦 نمونه سفارش:', res.data[0]) // برای دیباگ
       setOrders(res.data)
     } catch (error) {
       console.error('خطا:', error)
@@ -75,7 +77,7 @@ export default function OrdersPage() {
 
   const loadOrderDetails = async (orderId: number) => {
     if (orderDetails.has(orderId)) {
-      return // قبلاً بارگذاری شده
+      return
     }
 
     setLoadingDetails(prev => new Set(prev).add(orderId))
@@ -101,7 +103,7 @@ export default function OrdersPage() {
       newExpanded.delete(orderId)
     } else {
       newExpanded.add(orderId)
-      loadOrderDetails(orderId) // بارگذاری جزئیات
+      loadOrderDetails(orderId)
     }
     
     setExpandedRows(newExpanded)
@@ -345,7 +347,7 @@ export default function OrdersPage() {
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">شهر</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">وضعیت</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">کد رهگیری</th>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-700">تعداد کالا</th>
+                    <th className="px-4 py-3 text-right font-semibold text-gray-700">محصولات</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">تاریخ</th>
                   </tr>
                 </thead>
@@ -355,10 +357,14 @@ export default function OrdersPage() {
                     const details = orderDetails.get(order.id)
                     const isLoadingDetail = loadingDetails.has(order.id)
                     
+                    // 🔥 استفاده از items از خود order
+                    const orderItems = order.items || []
+                    const hasMultipleItems = orderItems.length > 1
+                    
                     return (
                       <React.Fragment key={order.id}>
                         {/* ردیف اصلی */}
-                        <tr className="border-b hover:bg-blue-50 transition">
+                        <tr className={`border-b hover:bg-blue-50 transition ${hasMultipleItems ? 'bg-yellow-50' : ''}`}>
                           <td className="px-4 py-3">
                             <button
                               onClick={() => toggleRow(order.id)}
