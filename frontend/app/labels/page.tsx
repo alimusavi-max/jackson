@@ -2,19 +2,29 @@
 
 import { useState, useEffect } from 'react'
 import { ordersAPI } from '@/lib/api'
+import { Printer, Download, Settings, CheckSquare, Square, AlertCircle, Package } from 'lucide-react'
 
 interface Order {
   id: number
   order_code: string
   shipment_id: string
   customer_name: string
+  customer_phone: string
   city: string
   province: string
   full_address: string
   postal_code: string
-  customer_phone: string
   tracking_code: string | null
   items_count: number
+  total_quantity: number
+  items: any[]
+}
+
+interface SenderProfile {
+  name: string
+  address: string
+  postal_code: string
+  phone: string
 }
 
 export default function LabelsPage() {
@@ -22,22 +32,51 @@ export default function LabelsPage() {
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  
+  // تنظیمات
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait')
+  const [includeDataMatrix, setIncludeDataMatrix] = useState(true)
+  const [includeQRCode, setIncludeQRCode] = useState(true)
+  const [fetchFromAPI, setFetchFromAPI] = useState(false)
+  
+  // فیلترها
+  const [filters, setFilters] = useState({
+    search: '',
+    city: 'all',
+    province: 'all',
+    hasAddress: true,
+    hasPhone: false,
+    multiItemOnly: false
+  })
+
+  // پروفایل فرستنده
+  const [senderProfiles, setSenderProfiles] = useState<Record<string, SenderProfile>>({})
+  const [selectedProfile, setSelectedProfile] = useState<string>('default')
+  const [currentSender, setCurrentSender] = useState<SenderProfile>({
+    name: '',
+    address: '',
+    postal_code: '',
+    phone: ''
+  })
+  const [newProfileName, setNewProfileName] = useState('')
 
   useEffect(() => {
     loadOrders()
+    loadProfiles()
   }, [])
 
   const loadOrders = async () => {
     try {
       setLoading(true)
-      // فقط سفارشاتی که آدرس کامل دارند
       const res = await ordersAPI.getAll({ limit: 1000 })
+      
+      // فیلتر سفارشاتی که آدرس دارند
       const ordersWithAddress = res.data.filter((o: Order) => 
         o.full_address && 
         o.full_address !== 'نامشخص' && 
-        o.customer_name &&
-        o.city
+        o.customer_name
       )
+      
       setOrders(ordersWithAddress)
     } catch (error) {
       console.error('خطا:', error)
@@ -45,6 +84,66 @@ export default function LabelsPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const loadProfiles = () => {
+    const saved = localStorage.getItem('sender_profiles')
+    if (saved) {
+      try {
+        const profiles = JSON.parse(saved)
+        setSenderProfiles(profiles)
+        if (profiles.default) {
+          setCurrentSender(profiles.default)
+        }
+      } catch (e) {
+        console.error('خطا در بارگذاری پروفایل‌ها')
+      }
+    }
+  }
+
+  const saveProfile = () => {
+    if (!newProfileName.trim()) {
+      alert('⚠️ لطفاً نام پروفایل را وارد کنید')
+      return
+    }
+
+    const updatedProfiles = {
+      ...senderProfiles,
+      [newProfileName]: { ...currentSender }
+    }
+    
+    setSenderProfiles(updatedProfiles)
+    localStorage.setItem('sender_profiles', JSON.stringify(updatedProfiles))
+    setSelectedProfile(newProfileName)
+    alert(`✅ پروفایل "${newProfileName}" ذخیره شد`)
+    setNewProfileName('')
+  }
+
+  const deleteProfile = (profileName: string) => {
+    if (profileName === 'default') {
+      alert('⚠️ نمی‌توانید پروفایل پیش‌فرض را حذف کنید')
+      return
+    }
+
+    if (!confirm(`آیا مطمئن هستید که می‌خواهید پروفایل "${profileName}" را حذف کنید؟`)) {
+      return
+    }
+
+    const updatedProfiles = { ...senderProfiles }
+    delete updatedProfiles[profileName]
+    
+    setSenderProfiles(updatedProfiles)
+    localStorage.setItem('sender_profiles', JSON.stringify(updatedProfiles))
+    
+    if (selectedProfile === profileName) {
+      setSelectedProfile('default')
+      setCurrentSender(updatedProfiles.default || { name: '', address: '', postal_code: '', phone: '' })
+    }
+  }
+
+  const selectProfile = (profileName: string) => {
+    setSelectedProfile(profileName)
+    setCurrentSender(senderProfiles[profileName] || { name: '', address: '', postal_code: '', phone: '' })
   }
 
   const toggleOrder = (orderId: number) => {
@@ -58,10 +157,10 @@ export default function LabelsPage() {
   }
 
   const toggleAll = () => {
-    if (selectedOrders.size === orders.length) {
+    if (selectedOrders.size === filteredOrders.length) {
       setSelectedOrders(new Set())
     } else {
-      setSelectedOrders(new Set(orders.map(o => o.id)))
+      setSelectedOrders(new Set(filteredOrders.map(o => o.id)))
     }
   }
 
@@ -71,17 +170,91 @@ export default function LabelsPage() {
       return
     }
 
+    // بررسی پروفایل فرستنده
+    if (!currentSender.name || !currentSender.address) {
+      alert('⚠️ لطفاً اطلاعات فرستنده را تکمیل کنید')
+      return
+    }
+
     setGenerating(true)
+
     try {
-      // TODO: اینجا API برای تولید PDF برچسب‌ها صدا زده میشه
-      alert(`🎉 در حال تولید ${selectedOrders.size} برچسب...\n\nاین قابلیت به زودی اضافه می‌شود!`)
+      const selectedOrdersList = orders.filter(o => selectedOrders.has(o.id))
+      
+      const response = await fetch('http://localhost:8000/api/labels/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orders: selectedOrdersList.map(o => ({
+            id: o.id,
+            order_code: o.order_code,
+            shipment_id: o.shipment_id,
+            customer_name: o.customer_name,
+            customer_phone: o.customer_phone,
+            city: o.city,
+            province: o.province,
+            full_address: o.full_address,
+            postal_code: o.postal_code,
+            items: o.items
+          })),
+          sender: currentSender,
+          settings: {
+            orientation,
+            include_datamatrix: includeDataMatrix,
+            include_qrcode: includeQRCode,
+            fetch_from_api: fetchFromAPI
+          }
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('خطا در تولید برچسب‌ها')
+      }
+
+      // دانلود PDF
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `labels_${new Date().getTime()}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+
+      alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد شد!`)
     } catch (error) {
       console.error('خطا:', error)
-      alert('خطا در تولید برچسب‌ها')
+      alert('❌ خطا در تولید برچسب‌ها. این قابلیت به زودی فعال می‌شود.')
     } finally {
       setGenerating(false)
     }
   }
+
+  // فیلتر کردن سفارشات
+  const filteredOrders = orders.filter(order => {
+    if (filters.search) {
+      const search = filters.search.toLowerCase()
+      if (
+        !order.order_code?.toLowerCase().includes(search) &&
+        !order.customer_name?.toLowerCase().includes(search) &&
+        !order.city?.toLowerCase().includes(search)
+      ) {
+        return false
+      }
+    }
+
+    if (filters.city !== 'all' && order.city !== filters.city) return false
+    if (filters.province !== 'all' && order.province !== filters.province) return false
+    if (filters.hasAddress && (!order.full_address || order.full_address === 'نامشخص')) return false
+    if (filters.hasPhone && (!order.customer_phone || order.customer_phone === 'نامشخص')) return false
+    if (filters.multiItemOnly && order.items_count <= 1) return false
+
+    return true
+  })
+
+  const cities = Array.from(new Set(orders.map(o => o.city).filter(Boolean))).sort()
+  const provinces = Array.from(new Set(orders.map(o => o.province).filter(Boolean))).sort()
 
   if (loading) {
     return (
@@ -107,16 +280,26 @@ export default function LabelsPage() {
               </div>
               <p className="text-gray-600 mt-1">
                 <span className="font-bold text-blue-600">{selectedOrders.size}</span> از{' '}
-                <span className="font-bold">{orders.length}</span> سفارش انتخاب شده
+                <span className="font-bold">{filteredOrders.length}</span> سفارش انتخاب شده
               </p>
             </div>
             <div className="flex gap-3">
               <button
                 onClick={generateLabels}
                 disabled={selectedOrders.size === 0 || generating}
-                className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+                className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:bg-gray-300 disabled:cursor-not-allowed font-medium flex items-center gap-2"
               >
-                {generating ? '⏳ در حال تولید...' : `📄 تولید ${selectedOrders.size} برچسب`}
+                {generating ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    در حال تولید...
+                  </>
+                ) : (
+                  <>
+                    <Printer size={20} />
+                    تولید {selectedOrders.size} برچسب
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -124,40 +307,274 @@ export default function LabelsPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6">
-        {/* Controls */}
+        {/* تنظیمات فرستنده */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-gray-900 mb-2">⚙️ تنظیمات</h3>
-              <p className="text-sm text-gray-600">
-                سفارشاتی که آدرس کامل دارند در لیست نمایش داده می‌شوند
-              </p>
+          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <Settings className="text-blue-600" />
+            اطلاعات فرستنده
+          </h2>
+
+          {/* انتخاب پروفایل */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                انتخاب پروفایل
+              </label>
+              <select
+                value={selectedProfile}
+                onChange={(e) => selectProfile(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">پروفایل جدید</option>
+                {Object.keys(senderProfiles).map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
             </div>
+            {selectedProfile && selectedProfile !== '' && (
+              <div className="flex items-end">
+                <button
+                  onClick={() => deleteProfile(selectedProfile)}
+                  className="w-full px-4 py-2.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
+                >
+                  🗑️ حذف پروفایل
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* فرم اطلاعات */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                نام فرستنده *
+              </label>
+              <input
+                type="text"
+                value={currentSender.name}
+                onChange={(e) => setCurrentSender({...currentSender, name: e.target.value})}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="مثال: فروشگاه تجارت دریای آرام"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                شماره تلفن *
+              </label>
+              <input
+                type="text"
+                value={currentSender.phone}
+                onChange={(e) => setCurrentSender({...currentSender, phone: e.target.value})}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="021-12345678"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                کد پستی *
+              </label>
+              <input
+                type="text"
+                value={currentSender.postal_code}
+                onChange={(e) => setCurrentSender({...currentSender, postal_code: e.target.value})}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="1234567890"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                آدرس کامل *
+              </label>
+              <input
+                type="text"
+                value={currentSender.address}
+                onChange={(e) => setCurrentSender({...currentSender, address: e.target.value})}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="تهران، خیابان..."
+              />
+            </div>
+          </div>
+
+          {/* ذخیره پروفایل */}
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={newProfileName}
+              onChange={(e) => setNewProfileName(e.target.value)}
+              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="نام پروفایل جدید (مثال: فروشگاه تهران)"
+            />
             <button
-              onClick={toggleAll}
-              className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition font-medium"
+              onClick={saveProfile}
+              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
             >
-              {selectedOrders.size === orders.length ? '❌ لغو انتخاب همه' : '✅ انتخاب همه'}
+              💾 ذخیره پروفایل
             </button>
           </div>
         </div>
 
-        {/* Orders List */}
+        {/* تنظیمات برچسب */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <Settings className="text-purple-600" />
+            تنظیمات برچسب
+          </h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                حالت چاپ
+              </label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={orientation === 'portrait'}
+                    onChange={() => setOrientation('portrait')}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <span>📄 عمودی (A5)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={orientation === 'landscape'}
+                    onChange={() => setOrientation('landscape')}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <span>📄 افقی (A5)</span>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                گزینه‌های اضافی
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeDataMatrix}
+                    onChange={(e) => setIncludeDataMatrix(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span>📊 Data Matrix (پیشنهاد می‌شود)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeQRCode}
+                    onChange={(e) => setIncludeQRCode(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span>🔲 QR Code</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={fetchFromAPI}
+                    onChange={(e) => setFetchFromAPI(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span>🔄 دریافت اطلاعات کامل از API</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* فیلترها */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+            🔍 فیلتر سفارشات
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <input
+              type="text"
+              placeholder="جستجو..."
+              value={filters.search}
+              onChange={(e) => setFilters({...filters, search: e.target.value})}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+
+            <select
+              value={filters.province}
+              onChange={(e) => setFilters({...filters, province: e.target.value})}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">همه استان‌ها</option>
+              {provinces.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+
+            <select
+              value={filters.city}
+              onChange={(e) => setFilters({...filters, city: e.target.value})}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">همه شهرها</option>
+              {cities.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.multiItemOnly}
+                  onChange={(e) => setFilters({...filters, multiItemOnly: e.target.checked})}
+                  className="w-4 h-4 text-orange-600 rounded"
+                />
+                <span className="text-sm">🎁 فقط چندقلمی</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* لیست سفارشات */}
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          {orders.length === 0 ? (
+          <div className="p-4 bg-gray-50 border-b flex items-center justify-between">
+            <button
+              onClick={toggleAll}
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition font-medium flex items-center gap-2"
+            >
+              {selectedOrders.size === filteredOrders.length ? (
+                <>
+                  <CheckSquare size={18} />
+                  لغو انتخاب همه
+                </>
+              ) : (
+                <>
+                  <Square size={18} />
+                  انتخاب همه ({filteredOrders.length})
+                </>
+              )}
+            </button>
+            
+            <span className="text-sm text-gray-600">
+              {filteredOrders.length} سفارش آماده چاپ برچسب
+            </span>
+          </div>
+
+          {filteredOrders.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
-              <p className="text-6xl mb-4">📦</p>
-              <p className="text-xl">هیچ سفارشی با آدرس کامل یافت نشد</p>
+              <Package size={64} className="mx-auto mb-4 text-gray-300" />
+              <p className="text-xl">هیچ سفارش آماده‌ای یافت نشد</p>
+              <p className="text-sm mt-2">سفارشات باید دارای آدرس کامل باشند</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200">
                   <tr>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-700 w-10">
+                    <th className="px-4 py-3 text-right w-10">
                       <input
                         type="checkbox"
-                        checked={selectedOrders.size === orders.length && orders.length > 0}
+                        checked={selectedOrders.size === filteredOrders.length && filteredOrders.length > 0}
                         onChange={toggleAll}
                         className="w-4 h-4"
                       />
@@ -166,18 +583,17 @@ export default function LabelsPage() {
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">کد سفارش</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">نام مشتری</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">شهر</th>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-700">آدرس</th>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-700">کد پستی</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">تعداد کالا</th>
+                    <th className="px-4 py-3 text-right font-semibold text-gray-700">کد پستی</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((order, index) => (
+                  {filteredOrders.map((order, index) => (
                     <tr
                       key={order.id}
                       className={`border-b hover:bg-blue-50 transition cursor-pointer ${
                         selectedOrders.has(order.id) ? 'bg-blue-50' : ''
-                      }`}
+                      } ${order.items_count > 1 ? 'bg-yellow-50' : ''}`}
                       onClick={() => toggleOrder(order.id)}
                     >
                       <td className="px-4 py-3">
@@ -205,17 +621,19 @@ export default function LabelsPage() {
                         <div>{order.city}</div>
                         <div className="text-xs text-gray-500">{order.province}</div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs max-w-xs truncate">
-                        {order.full_address}
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-bold">
+                            {order.total_quantity} عدد
+                          </span>
+                          {order.items_count > 1 && (
+                            <span className="text-orange-600 text-lg" title="چندقلمی">🎁</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">
                           {order.postal_code || '-'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-bold">
-                          {order.items_count} عدد
                         </span>
                       </td>
                     </tr>
