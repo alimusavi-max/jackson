@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database.models import Order, OrderItem, SenderProfile, SMSLog, Base
-from routers import orders
+from routers import orders, labels  # 🔥 اضافه کردن labels
 
 # ==================== تنظیمات دیتابیس ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -65,6 +65,7 @@ def get_db():
 
 # ==================== Include Routers ====================
 app.include_router(orders.router, prefix="/api", tags=["orders"])
+app.include_router(labels.router, prefix="/api", tags=["labels"])  # 🔥 اضافه شد
 
 # ==================== Routes ====================
 @app.get("/")
@@ -130,7 +131,7 @@ def get_orders(
     search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """🔥 دریافت لیست سفارشات - نسخه اصلاح شده با تعداد صحیح"""
+    """🔥 دریافت لیست سفارشات"""
     try:
         query = db.query(Order)
         
@@ -162,17 +163,15 @@ def get_orders(
         for order in orders:
             items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
             
-            # 🔥 محاسبه صحیح تعداد کل (مجموع quantity های تمام آیتم‌ها)
             total_quantity = sum(item.quantity for item in items)
             total_amount = sum(item.price * item.quantity for item in items)
             
-            # 🔥 لیست کامل محصولات با تعداد هر یک
             items_list = [
                 {
                     "id": item.id,
                     "product_title": item.product_title,
                     "product_code": item.product_code,
-                    "quantity": item.quantity,  # تعداد هر محصول
+                    "quantity": item.quantity,
                     "price": item.price,
                     "product_image": item.product_image
                 }
@@ -192,10 +191,10 @@ def get_orders(
                 "postal_code": order.postal_code or "",
                 "tracking_code": order.tracking_code,
                 "order_date_persian": order.order_date_persian or "",
-                "items_count": len(items),  # تعداد آیتم‌های منحصر به فرد
-                "total_quantity": total_quantity,  # 🔥 مجموع تعداد واقعی کالاها
+                "items_count": len(items),
+                "total_quantity": total_quantity,
                 "total_amount": total_amount,
-                "items": items_list  # 🔥 لیست کامل محصولات با quantity هر یک
+                "items": items_list
             })
         
         return result
@@ -208,7 +207,7 @@ def get_orders(
     
 @app.get("/api/orders/{order_id}")
 def get_order_detail(order_id: int, db: Session = Depends(get_db)):
-    """جزئیات یک سفارش با تعداد صحیح"""
+    """جزئیات یک سفارش"""
     from fastapi import HTTPException
     
     order = db.query(Order).filter(Order.id == order_id).first()
@@ -248,7 +247,7 @@ def get_order_detail(order_id: int, db: Session = Depends(get_db)):
         "order_date_persian": order.order_date_persian,
         "items": items_list,
         "items_count": len(items),
-        "total_quantity": total_quantity,  # تعداد کل واقعی
+        "total_quantity": total_quantity,
         "total_amount": total_amount
     }
 

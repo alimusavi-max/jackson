@@ -17,3 +17,4 @@ qrcode==7.4.2
 pillow==10.2.0
 reportlab==4.0.9
 treepoem==3.23.0
+reportlab==4.0.9

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { ordersAPI } from '@/lib/api'
-import { Printer, Download, Settings, CheckSquare, Square, AlertCircle, Package } from 'lucide-react'
+import { Printer, Settings, CheckSquare, Square, Package } from 'lucide-react'
 
 interface Order {
   id: number
@@ -37,20 +37,19 @@ export default function LabelsPage() {
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait')
   const [includeDataMatrix, setIncludeDataMatrix] = useState(true)
   const [includeQRCode, setIncludeQRCode] = useState(true)
-  const [fetchFromAPI, setFetchFromAPI] = useState(false)
   
   // فیلترها
   const [filters, setFilters] = useState({
     search: '',
     city: 'all',
     province: 'all',
-    hasAddress: true,
-    hasPhone: false,
     multiItemOnly: false
   })
 
-  // پروفایل فرستنده
-  const [senderProfiles, setSenderProfiles] = useState<Record<string, SenderProfile>>({})
+  // پروفایل فرستنده - فقط state، بدون localStorage
+  const [senderProfiles, setSenderProfiles] = useState<Record<string, SenderProfile>>({
+    'default': { name: '', address: '', postal_code: '', phone: '' }
+  })
   const [selectedProfile, setSelectedProfile] = useState<string>('default')
   const [currentSender, setCurrentSender] = useState<SenderProfile>({
     name: '',
@@ -62,7 +61,6 @@ export default function LabelsPage() {
 
   useEffect(() => {
     loadOrders()
-    loadProfiles()
   }, [])
 
   const loadOrders = async () => {
@@ -70,7 +68,6 @@ export default function LabelsPage() {
       setLoading(true)
       const res = await ordersAPI.getAll({ limit: 1000 })
       
-      // فیلتر سفارشاتی که آدرس دارند
       const ordersWithAddress = res.data.filter((o: Order) => 
         o.full_address && 
         o.full_address !== 'نامشخص' && 
@@ -86,21 +83,6 @@ export default function LabelsPage() {
     }
   }
 
-  const loadProfiles = () => {
-    const saved = localStorage.getItem('sender_profiles')
-    if (saved) {
-      try {
-        const profiles = JSON.parse(saved)
-        setSenderProfiles(profiles)
-        if (profiles.default) {
-          setCurrentSender(profiles.default)
-        }
-      } catch (e) {
-        console.error('خطا در بارگذاری پروفایل‌ها')
-      }
-    }
-  }
-
   const saveProfile = () => {
     if (!newProfileName.trim()) {
       alert('⚠️ لطفاً نام پروفایل را وارد کنید')
@@ -113,7 +95,6 @@ export default function LabelsPage() {
     }
     
     setSenderProfiles(updatedProfiles)
-    localStorage.setItem('sender_profiles', JSON.stringify(updatedProfiles))
     setSelectedProfile(newProfileName)
     alert(`✅ پروفایل "${newProfileName}" ذخیره شد`)
     setNewProfileName('')
@@ -133,7 +114,6 @@ export default function LabelsPage() {
     delete updatedProfiles[profileName]
     
     setSenderProfiles(updatedProfiles)
-    localStorage.setItem('sender_profiles', JSON.stringify(updatedProfiles))
     
     if (selectedProfile === profileName) {
       setSelectedProfile('default')
@@ -170,7 +150,6 @@ export default function LabelsPage() {
       return
     }
 
-    // بررسی پروفایل فرستنده
     if (!currentSender.name || !currentSender.address) {
       alert('⚠️ لطفاً اطلاعات فرستنده را تکمیل کنید')
       return
@@ -202,7 +181,7 @@ export default function LabelsPage() {
             orientation,
             include_datamatrix: includeDataMatrix,
             include_qrcode: includeQRCode,
-            fetch_from_api: fetchFromAPI
+            fetch_from_api: false
           }
         })
       })
@@ -225,7 +204,7 @@ export default function LabelsPage() {
       alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد شد!`)
     } catch (error) {
       console.error('خطا:', error)
-      alert('❌ خطا در تولید برچسب‌ها. این قابلیت به زودی فعال می‌شود.')
+      alert('❌ خطا در تولید برچسب‌ها')
     } finally {
       setGenerating(false)
     }
@@ -246,8 +225,6 @@ export default function LabelsPage() {
 
     if (filters.city !== 'all' && order.city !== filters.city) return false
     if (filters.province !== 'all' && order.province !== filters.province) return false
-    if (filters.hasAddress && (!order.full_address || order.full_address === 'نامشخص')) return false
-    if (filters.hasPhone && (!order.customer_phone || order.customer_phone === 'نامشخص')) return false
     if (filters.multiItemOnly && order.items_count <= 1) return false
 
     return true
@@ -469,15 +446,6 @@ export default function LabelsPage() {
                     className="w-4 h-4 text-blue-600 rounded"
                   />
                   <span>🔲 QR Code</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={fetchFromAPI}
-                    onChange={(e) => setFetchFromAPI(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 rounded"
-                  />
-                  <span>🔄 دریافت اطلاعات کامل از API</span>
                 </label>
               </div>
             </div>
