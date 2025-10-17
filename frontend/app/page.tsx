@@ -24,7 +24,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
 
-  // دریافت داده‌ها
   useEffect(() => {
     loadData()
   }, [])
@@ -33,11 +32,9 @@ export default function Dashboard() {
     try {
       setLoading(true)
       
-      // دریافت آمار
       const statsRes = await ordersAPI.getStats()
       setStats(statsRes.data)
       
-      // دریافت آخرین سفارشات
       const ordersRes = await ordersAPI.getAll({ limit: 5 })
       setRecentOrders(ordersRes.data)
     } catch (error) {
@@ -47,7 +44,6 @@ export default function Dashboard() {
     }
   }
 
-  // همگام‌سازی با API دیجی‌کالا
   const handleSync = async () => {
     if (!confirm('⚠️ آیا مطمئن هستید؟\n\nاین عملیات ممکن است چند دقیقه طول بکشد و سفارشات جدید را از دیجی‌کالا دریافت می‌کند.')) {
       return
@@ -194,23 +190,27 @@ export default function Dashboard() {
         {/* Quick Actions */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
           <h2 className="text-xl font-bold text-gray-900 mb-4">⚡ دسترسی سریع</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <a href="/orders" className="p-4 border-2 border-blue-200 rounded-xl hover:bg-blue-50 hover:border-blue-400 transition text-center block">
               <div className="text-3xl mb-2">📋</div>
               <div className="font-medium text-gray-700">سفارشات</div>
             </a>
-            <button className="p-4 border-2 border-green-200 rounded-xl hover:bg-green-50 hover:border-green-400 transition text-center">
+            <a href="/labels" className="p-4 border-2 border-green-200 rounded-xl hover:bg-green-50 hover:border-green-400 transition text-center block">
               <div className="text-3xl mb-2">🏷️</div>
               <div className="font-medium text-gray-700">برچسب پستی</div>
-            </button>
+            </a>
+            <a href="/tracking" className="p-4 border-2 border-yellow-200 rounded-xl hover:bg-yellow-50 hover:border-yellow-400 transition text-center block">
+              <div className="text-3xl mb-2">📮</div>
+              <div className="font-medium text-gray-700">کد رهگیری</div>
+            </a>
             <a href="/sms" className="p-4 border-2 border-purple-200 rounded-xl hover:bg-purple-50 hover:border-purple-400 transition text-center block">
               <div className="text-3xl mb-2">📱</div>
               <div className="font-medium text-gray-700">ارسال پیامک</div>
             </a>
-            <button className="p-4 border-2 border-orange-200 rounded-xl hover:bg-orange-50 hover:border-orange-400 transition text-center">
+            <a href="/reports" className="p-4 border-2 border-orange-200 rounded-xl hover:bg-orange-50 hover:border-orange-400 transition text-center block">
               <div className="text-3xl mb-2">📊</div>
               <div className="font-medium text-gray-700">گزارشات</div>
-            </button>
+            </a>
           </div>
         </div>
 

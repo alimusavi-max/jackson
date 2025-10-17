@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { ordersAPI } from '@/lib/api'
-import { Printer, Settings, CheckSquare, Square, Package, Loader2 } from 'lucide-react'
+import { Printer, Settings, CheckSquare, Square, Package, Loader2, AlertCircle } from 'lucide-react'
 
 interface Order {
   id: number
@@ -27,20 +27,11 @@ interface SenderProfile {
   phone: string
 }
 
-interface ProgressState {
-  current: number
-  total: number
-  percentage: number
-  currentOrder: string
-  message: string
-}
-
 export default function LabelsPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const [progress, setProgress] = useState<ProgressState | null>(null)
   
   // تنظیمات
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait')
@@ -165,31 +156,12 @@ export default function LabelsPage() {
     }
 
     setGenerating(true)
-    setProgress({
-      current: 0,
-      total: selectedOrders.size,
-      percentage: 0,
-      currentOrder: '',
-      message: 'شروع تولید برچسب‌ها...'
-    })
 
     try {
       const selectedOrdersList = orders.filter(o => selectedOrders.has(o.id))
       
-      // نمایش پیشرفت شبیه‌سازی شده (چون SSE در مرورگر پیچیده است)
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (!prev) return null
-          const newCurrent = Math.min(prev.current + 1, prev.total - 1)
-          return {
-            ...prev,
-            current: newCurrent,
-            percentage: Math.round((newCurrent / prev.total) * 100),
-            currentOrder: selectedOrdersList[newCurrent]?.order_code || '',
-            message: `در حال پردازش ${newCurrent + 1} از ${prev.total}...`
-          }
-        })
-      }, 500)
+      console.log('🚀 شروع تولید برچسب‌ها...')
+      console.log(`📦 تعداد سفارشات: ${selectedOrdersList.length}`)
 
       const response = await fetch('http://localhost:8000/api/labels/generate', {
         method: 'POST',
@@ -217,24 +189,18 @@ export default function LabelsPage() {
         })
       })
 
-      clearInterval(progressInterval)
+      console.log(`📡 پاسخ سرور: ${response.status} ${response.statusText}`)
 
       if (!response.ok) {
         const errorText = await response.text()
-        throw new Error(`خطا در سرور: ${errorText}`)
+        console.error('❌ خطای سرور:', errorText)
+        throw new Error(`خطا در سرور: ${response.status}`)
       }
-
-      // بروزرسانی پیشرفت به 100%
-      setProgress({
-        current: selectedOrders.size,
-        total: selectedOrders.size,
-        percentage: 100,
-        currentOrder: '',
-        message: 'در حال آماده‌سازی دانلود...'
-      })
 
       // دانلود PDF
       const blob = await response.blob()
+      console.log(`📄 حجم PDF: ${(blob.size / 1024).toFixed(2)} KB`)
+      
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -244,13 +210,25 @@ export default function LabelsPage() {
       document.body.removeChild(a)
       window.URL.revokeObjectURL(url)
 
-      alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد شد!`)
+      console.log('✅ دانلود موفق')
+      alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد و دانلود شد!`)
+      
     } catch (error: any) {
-      console.error('خطا:', error)
-      alert(`❌ خطا در تولید برچسب‌ها:\n\n${error.message}`)
+      console.error('❌ خطای کامل:', error)
+      
+      let errorMessage = 'خطای ناشناخته'
+      
+      if (error.message) {
+        errorMessage = error.message
+      }
+      
+      if (error.response) {
+        errorMessage = `خطای سرور: ${error.response.status}`
+      }
+      
+      alert(`❌ خطا در تولید برچسب‌ها:\n\n${errorMessage}\n\nلطفاً Console را بررسی کنید.`)
     } finally {
       setGenerating(false)
-      setProgress(null)
     }
   }
 
@@ -327,29 +305,17 @@ export default function LabelsPage() {
         </div>
       </header>
 
-      {/* Progress Bar */}
-      {generating && progress && (
+      {/* هشدار در صورت generating */}
+      {generating && (
         <div className="bg-blue-50 border-b border-blue-200">
           <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium text-blue-700">
-                {progress.message}
-              </span>
-              <span className="text-sm font-bold text-blue-900">
-                {progress.percentage}%
-              </span>
+            <div className="flex items-center gap-3">
+              <Loader2 className="animate-spin text-blue-600" size={24} />
+              <div>
+                <p className="font-medium text-blue-900">در حال تولید برچسب‌ها...</p>
+                <p className="text-sm text-blue-700">لطفاً صبر کنید، این عملیات ممکن است چند ثانیه طول بکشد.</p>
+              </div>
             </div>
-            <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
-              <div
-                className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-300 ease-out"
-                style={{ width: `${progress.percentage}%` }}
-              />
-            </div>
-            {progress.currentOrder && (
-              <p className="text-xs text-blue-600 mt-2">
-                سفارش جاری: {progress.currentOrder}
-              </p>
-            )}
           </div>
         </div>
       )}
@@ -361,6 +327,15 @@ export default function LabelsPage() {
             <Settings className="text-blue-600" />
             اطلاعات فرستنده
           </h2>
+
+          {/* هشدار */}
+          <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-3">
+            <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={20} />
+            <div className="text-sm text-yellow-900">
+              <p className="font-semibold mb-1">⚠️ مهم:</p>
+              <p>لطفاً اطلاعات فرستنده را با دقت وارد کنید. این اطلاعات روی برچسب پستی چاپ می‌شود.</p>
+            </div>
+          </div>
 
           {/* انتخاب پروفایل */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
