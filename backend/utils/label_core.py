@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # backend/utils/label_core.py
 import io
 import os
@@ -9,17 +10,24 @@ import arabic_reshaper
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.pagesizes import A5
-import treepoem
 
-# مسیر فونت را به درستی پیدا کن
+# بررسی و import treepoem برای Data Matrix
+try:
+    import treepoem
+    TREEPOEM_AVAILABLE = True
+except ImportError:
+    TREEPOEM_AVAILABLE = False
+    print("⚠️ treepoem not available - Data Matrix will be skipped")
+
 def get_font_path():
     """پیدا کردن مسیر فونت Vazir"""
-    # جستجو در چند مسیر احتمالی
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
     possible_paths = [
-        "Vazir.ttf",  # روت پروژه
-        "../Vazir.ttf",  # یک سطح بالاتر
-        "../../Vazir.ttf",  # دو سطح بالاتر
-        os.path.join(os.path.dirname(__file__), "..", "..", "Vazir.ttf"),  # مسیر نسبی
+        os.path.join(current_dir, "..", "..", "Vazir.ttf"),  # روت پروژه
+        os.path.join(current_dir, "..", "Vazir.ttf"),  # backend/
+        os.path.join(current_dir, "Vazir.ttf"),  # backend/utils/
+        "Vazir.ttf",  # current directory
     ]
     
     for path in possible_paths:
@@ -28,7 +36,7 @@ def get_font_path():
             print(f"✅ فونت پیدا شد: {abs_path}")
             return abs_path
     
-    print("⚠️ فونت Vazir.ttf پیدا نشد، از فونت پیش‌فرض استفاده می‌شود")
+    print("⚠️ فونت Vazir.ttf پیدا نشد!")
     return None
 
 
@@ -37,11 +45,12 @@ def process_persian(text):
     if not text:
         return ""
     try:
-        reshaped_text = arabic_reshaper.reshape(str(text))
+        text = str(text)
+        reshaped_text = arabic_reshaper.reshape(text)
         bidi_text = get_display(reshaped_text)
         return bidi_text
     except Exception as e:
-        print(f"خطا در پردازش متن فارسی: {e}")
+        print(f"⚠️ خطا در پردازش متن فارسی '{text}': {e}")
         return str(text)
 
 
@@ -49,18 +58,19 @@ def load_fonts():
     """بارگذاری فونت‌ها با اندازه‌های مختلف"""
     font_path = get_font_path()
     
-    try:
-        if font_path:
+    if font_path:
+        try:
             return {
                 'regular': ImageFont.truetype(font_path, 16),
                 'small': ImageFont.truetype(font_path, 14),
                 'large': ImageFont.truetype(font_path, 32),
                 'warning': ImageFont.truetype(font_path, 18),
             }
-    except Exception as e:
-        print(f"خطا در بارگذاری فونت: {e}")
+        except Exception as e:
+            print(f"❌ خطا در بارگذاری فونت: {e}")
     
-    # اگر فونت لود نشد، از فونت پیش‌فرض استفاده کن
+    # Fallback به فونت پیش‌فرض
+    print("⚠️ استفاده از فونت پیش‌فرض")
     default = ImageFont.load_default()
     return {
         'regular': default,
@@ -73,7 +83,9 @@ def load_fonts():
 def generate_label_portrait(order_id, sender_info, receiver_info, include_datamatrix=True):
     """تولید برچسب پستی عمودی A5 با پشتیبانی کامل فارسی"""
     
-    # ایجاد تصویر پایه
+    print(f"   🎨 تولید برچسب برای سفارش {order_id}")
+    
+    # ایجاد تصویر پایه (600x400 برای A5 landscape)
     label = Image.new('RGB', (600, 400), color='white')
     draw = ImageDraw.Draw(label)
     
@@ -95,20 +107,20 @@ def generate_label_portrait(order_id, sender_info, receiver_info, include_datama
         
         # کد سفارش زیر QR
         draw.text((70, 125), str(order_id), font=fonts['regular'], fill=text_color, anchor='mt')
+        print(f"      ✅ QR Code")
     except Exception as e:
-        print(f"خطا در تولید QR Code: {e}")
+        print(f"      ⚠️ خطا در تولید QR Code: {e}")
 
     # Data Matrix Barcode
-    if include_datamatrix:
+    if include_datamatrix and TREEPOEM_AVAILABLE:
         try:
-            dm_string = (
-                f"{receiver_info.get('city', receiver_info.get('شهر', ''))}\t"
-                f"{receiver_info.get('نام مشتری', '')} {order_id}\t\t"
-                f"{receiver_info.get('postalCode', receiver_info.get('کد پستی', ''))}\t\t"
-                f"{receiver_info.get('phoneNumber', receiver_info.get('شماره تلفن', ''))}\t"
-                f"{receiver_info.get('address', receiver_info.get('آدرس کامل', ''))}\t"
-                f"{receiver_info.get('city', receiver_info.get('شهر', ''))}\t\r"
-            )
+            city = receiver_info.get('city', receiver_info.get('شهر', ''))
+            customer = receiver_info.get('نام مشتری', '')
+            postal = receiver_info.get('postalCode', receiver_info.get('کد پستی', ''))
+            phone = receiver_info.get('phoneNumber', receiver_info.get('شماره تلفن', ''))
+            address = receiver_info.get('address', receiver_info.get('آدرس کامل', ''))
+            
+            dm_string = f"{city}\t{customer} {order_id}\t\t{postal}\t\t{phone}\t{address}\t{city}\t\r"
             
             dm_image = treepoem.generate_barcode(
                 barcode_type='datamatrix',
@@ -116,9 +128,13 @@ def generate_label_portrait(order_id, sender_info, receiver_info, include_datama
             )
             dm_image_resized = dm_image.convert('RGB').resize((100, 100))
             label.paste(dm_image_resized, (20, 150))
+            print(f"      ✅ Data Matrix")
         except Exception as e:
-            print(f"خطا در تولید Data Matrix: {e}")
+            print(f"      ⚠️ خطا در تولید Data Matrix: {e}")
             draw.rectangle([20, 150, 120, 250], fill='lightgray')
+    else:
+        # اگر treepoem نباشد، یک مربع خاکستری بگذار
+        draw.rectangle([20, 150, 120, 250], fill='lightgray')
 
     # ========== بخش اطلاعات فرستنده و گیرنده (سمت راست) ==========
     y_pos = 10
@@ -128,7 +144,8 @@ def generate_label_portrait(order_id, sender_info, receiver_info, include_datama
               font=fonts['regular'], fill=text_color, anchor='ra')
     y_pos += line_height
     
-    draw.text((580, y_pos), process_persian(f"نام: {sender_info.get('name', '')}"), 
+    sender_name = sender_info.get('name', '')
+    draw.text((580, y_pos), process_persian(f"نام: {sender_name}"), 
               font=fonts['regular'], fill=text_color, anchor='ra')
     y_pos += line_height
     
@@ -139,11 +156,13 @@ def generate_label_portrait(order_id, sender_info, receiver_info, include_datama
                   font=fonts['small'], fill=text_color, anchor='ra')
         y_pos += line_height - 2
     
-    draw.text((580, y_pos), process_persian(f"کد پستی: {sender_info.get('postal_code', '')}"), 
+    sender_postal = sender_info.get('postal_code', '')
+    draw.text((580, y_pos), process_persian(f"کد پستی: {sender_postal}"), 
               font=fonts['regular'], fill=text_color, anchor='ra')
     y_pos += line_height
     
-    draw.text((580, y_pos), process_persian(f"تلفن: {sender_info.get('phone', '')}"), 
+    sender_phone = sender_info.get('phone', '')
+    draw.text((580, y_pos), process_persian(f"تلفن: {sender_phone}"), 
               font=fonts['regular'], fill=text_color, anchor='ra')
     y_pos += line_height * 1.5
 
@@ -182,7 +201,7 @@ def generate_label_portrait(order_id, sender_info, receiver_info, include_datama
     products = receiver_info.get('products', [])
     
     if products:
-        y_pos = 390  # شروع از پایین
+        y_pos = 390
         
         # خط جداکننده
         separator_y = y_pos - (len(products) * 60)
@@ -193,7 +212,7 @@ def generate_label_portrait(order_id, sender_info, receiver_info, include_datama
             item_name = item.get('name', item.get('product_title', 'نامشخص'))
             item_qty = int(item.get('qty', item.get('quantity', 1)))
             
-            # محاسبه ارتفاع مورد نیاز
+            # محاسبه ارتفاع
             wrapped_lines = textwrap.wrap(item_name, width=35)
             name_height = len(wrapped_lines) * 18
             item_height = max(55, name_height + 10)
@@ -227,7 +246,7 @@ def generate_label_portrait(order_id, sender_info, receiver_info, include_datama
                 )
                 name_y += 18
             
-            y_pos -= 5  # فاصله بین اقلام
+            y_pos -= 5
 
     # ========== هشدار چندقلمی ==========
     if len(products) > 1:
@@ -239,7 +258,9 @@ def generate_label_portrait(order_id, sender_info, receiver_info, include_datama
             fill='#8B0000',
             anchor='mm'
         )
+        print(f"      🎁 سفارش چندقلمی ({len(products)} قلم)")
 
+    print(f"      ✅ برچسب کامل شد")
     return label
 
 
@@ -289,7 +310,7 @@ def create_pdf_two_labels(label_images, output_path, page_size):
     for i in range(0, len(label_images), 2):
         # برچسب بالا
         if i < len(label_images):
-            label_images[i].seek(0)  # بازگشت به ابتدای BytesIO
+            label_images[i].seek(0)
             c.drawImage(
                 ImageReader(label_images[i]),
                 0, half_h,

@@ -1,317 +1,309 @@
-# backend/utils/label_core.py
+# backend/routers/labels.py
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from typing import List, Optional
+from pydantic import BaseModel
 import io
+from datetime import datetime
+import sys
 import os
-import qrcode
-import textwrap
-from PIL import Image, ImageDraw, ImageFont
-from bidi.algorithm import get_display
-import arabic_reshaper
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
-from reportlab.lib.pagesizes import A5
-import treepoem
 
-# مسیر فونت را به درستی پیدا کن
-def get_font_path():
-    """پیدا کردن مسیر فونت Vazir"""
-    # جستجو در چند مسیر احتمالی
-    possible_paths = [
-        "Vazir.ttf",  # روت پروژه
-        "../Vazir.ttf",  # یک سطح بالاتر
-        "../../Vazir.ttf",  # دو سطح بالاتر
-        os.path.join(os.path.dirname(__file__), "..", "..", "Vazir.ttf"),  # مسیر نسبی
-    ]
-    
-    for path in possible_paths:
-        abs_path = os.path.abspath(path)
-        if os.path.exists(abs_path):
-            print(f"✅ فونت پیدا شد: {abs_path}")
-            return abs_path
-    
-    print("⚠️ فونت Vazir.ttf پیدا نشد، از فونت پیش‌فرض استفاده می‌شود")
-    return None
+# اضافه کردن مسیر backend به sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import توابع label generation
+try:
+    from utils.label_core import (
+        generate_label_portrait,
+        generate_label_landscape,
+        create_pdf_two_labels,
+        get_font_path
+    )
+    from reportlab.lib.pagesizes import A5
+    LABEL_CORE_AVAILABLE = True
+    print("✅ utils.label_core imported successfully")
+except ImportError as e:
+    LABEL_CORE_AVAILABLE = False
+    print(f"❌ خطا در import utils.label_core: {e}")
+    import traceback
+    traceback.print_exc()
 
-def process_persian(text):
-    """آماده‌سازی متن فارسی برای نمایش صحیح"""
-    if not text:
-        return ""
-    try:
-        reshaped_text = arabic_reshaper.reshape(str(text))
-        bidi_text = get_display(reshaped_text)
-        return bidi_text
-    except Exception as e:
-        print(f"خطا در پردازش متن فارسی: {e}")
-        return str(text)
+router = APIRouter(prefix="/labels", tags=["Labels"])
 
+# ========== Pydantic Models ==========
+class ProductItem(BaseModel):
+    name: Optional[str] = None
+    qty: Optional[int] = 1
+    product_title: Optional[str] = None
+    quantity: Optional[int] = None
 
-def load_fonts():
-    """بارگذاری فونت‌ها با اندازه‌های مختلف"""
-    font_path = get_font_path()
-    
-    try:
-        if font_path:
-            return {
-                'regular': ImageFont.truetype(font_path, 16),
-                'small': ImageFont.truetype(font_path, 14),
-                'large': ImageFont.truetype(font_path, 32),
-                'warning': ImageFont.truetype(font_path, 18),
-            }
-    except Exception as e:
-        print(f"خطا در بارگذاری فونت: {e}")
-    
-    # اگر فونت لود نشد، از فونت پیش‌فرض استفاده کن
-    default = ImageFont.load_default()
+class OrderData(BaseModel):
+    id: int
+    order_code: str
+    shipment_id: str
+    customer_name: str
+    customer_phone: str
+    city: str
+    province: str
+    full_address: str
+    postal_code: str
+    items: List[ProductItem]
+
+class SenderInfo(BaseModel):
+    name: str
+    address: str
+    postal_code: str
+    phone: str
+
+class LabelSettings(BaseModel):
+    orientation: str = "portrait"
+    include_datamatrix: bool = True
+    include_qrcode: bool = True
+    fetch_from_api: bool = False
+
+class GenerateLabelsRequest(BaseModel):
+    orders: List[OrderData]
+    sender: SenderInfo
+    settings: LabelSettings
+
+# ========== Endpoints ==========
+@router.get("/test")
+async def test_labels_api():
+    """تست اتصال به API برچسب‌ها"""
     return {
-        'regular': default,
-        'small': default,
-        'large': default,
-        'warning': default,
+        "status": "ok",
+        "message": "Labels API is working!",
+        "label_core_available": LABEL_CORE_AVAILABLE
     }
 
 
-def generate_label_portrait(order_id, sender_info, receiver_info, include_datamatrix=True):
-    """تولید برچسب پستی عمودی A5 با پشتیبانی کامل فارسی"""
+@router.get("/test-font")
+async def test_font():
+    """تست فونت برای دیباگ"""
+    if not LABEL_CORE_AVAILABLE:
+        return {
+            "status": "error",
+            "message": "label_core not imported"
+        }
     
-    # ایجاد تصویر پایه
-    label = Image.new('RGB', (600, 400), color='white')
-    draw = ImageDraw.Draw(label)
+    font_path = get_font_path()
     
-    # بارگذاری فونت‌ها
-    fonts = load_fonts()
-    
-    text_color = (0, 0, 0)
-    line_height = 20
+    if font_path:
+        import os
+        exists = os.path.exists(font_path)
+        size = os.path.getsize(font_path) if exists else 0
+        
+        return {
+            "status": "found",
+            "path": font_path,
+            "exists": exists,
+            "size_kb": round(size / 1024, 2)
+        }
+    else:
+        return {
+            "status": "not_found",
+            "message": "فونت Vazir.ttf پیدا نشد"
+        }
 
-    # ========== بخش بارکدها (سمت چپ) ==========
+
+@router.get("/sample")
+async def generate_sample_label():
+    """تولید یک برچسب نمونه برای تست"""
+    
+    if not LABEL_CORE_AVAILABLE:
+        raise HTTPException(status_code=500, detail="label_core not available")
+    
+    sender_info = {
+        'name': 'فروشگاه تجارت دریای آرام',
+        'address': 'تهران، خیابان ولیعصر، پلاک ۱۲۳',
+        'postal_code': '1234567890',
+        'phone': '021-12345678'
+    }
+    
+    receiver_info = {
+        'نام مشتری': 'علی احمدی',
+        'شهر': 'تهران',
+        'استان': 'تهران',
+        'آدرس کامل': 'تهران، خیابان آزادی، کوچه شهید رضایی، پلاک ۴۵',
+        'کد پستی': '9876543210',
+        'شماره تلفن': '09123456789',
+        'products': [
+            {'name': 'گوشی موبایل سامسونگ Galaxy A54', 'qty': 1},
+            {'name': 'کاور محافظ سیلیکونی', 'qty': 2},
+        ]
+    }
+    
     try:
-        # QR Code
-        qr = qrcode.QRCode(version=1, box_size=10, border=2)
-        qr.add_data(str(order_id))
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white")
-        qr_img = qr_img.resize((100, 100))
-        label.paste(qr_img, (20, 20))
+        print("🎨 در حال تولید برچسب نمونه...")
         
-        # کد سفارش زیر QR
-        draw.text((70, 125), str(order_id), font=fonts['regular'], fill=text_color, anchor='mt')
-    except Exception as e:
-        print(f"خطا در تولید QR Code: {e}")
-
-    # Data Matrix Barcode
-    if include_datamatrix:
-        try:
-            dm_string = (
-                f"{receiver_info.get('city', receiver_info.get('شهر', ''))}\t"
-                f"{receiver_info.get('نام مشتری', '')} {order_id}\t\t"
-                f"{receiver_info.get('postalCode', receiver_info.get('کد پستی', ''))}\t\t"
-                f"{receiver_info.get('phoneNumber', receiver_info.get('شماره تلفن', ''))}\t"
-                f"{receiver_info.get('address', receiver_info.get('آدرس کامل', ''))}\t"
-                f"{receiver_info.get('city', receiver_info.get('شهر', ''))}\t\r"
-            )
-            
-            dm_image = treepoem.generate_barcode(
-                barcode_type='datamatrix',
-                data=dm_string
-            )
-            dm_image_resized = dm_image.convert('RGB').resize((100, 100))
-            label.paste(dm_image_resized, (20, 150))
-        except Exception as e:
-            print(f"خطا در تولید Data Matrix: {e}")
-            draw.rectangle([20, 150, 120, 250], fill='lightgray')
-
-    # ========== بخش اطلاعات فرستنده و گیرنده (سمت راست) ==========
-    y_pos = 10
-    
-    # فرستنده
-    draw.text((580, y_pos), process_persian("فرستنده:"), 
-              font=fonts['regular'], fill=text_color, anchor='ra')
-    y_pos += line_height
-    
-    draw.text((580, y_pos), process_persian(f"نام: {sender_info.get('name', '')}"), 
-              font=fonts['regular'], fill=text_color, anchor='ra')
-    y_pos += line_height
-    
-    # آدرس فرستنده (چندخطی)
-    sender_address = f"آدرس: {sender_info.get('address', '')}"
-    for line in textwrap.wrap(sender_address, width=40):
-        draw.text((580, y_pos), process_persian(line), 
-                  font=fonts['small'], fill=text_color, anchor='ra')
-        y_pos += line_height - 2
-    
-    draw.text((580, y_pos), process_persian(f"کد پستی: {sender_info.get('postal_code', '')}"), 
-              font=fonts['regular'], fill=text_color, anchor='ra')
-    y_pos += line_height
-    
-    draw.text((580, y_pos), process_persian(f"تلفن: {sender_info.get('phone', '')}"), 
-              font=fonts['regular'], fill=text_color, anchor='ra')
-    y_pos += line_height * 1.5
-
-    # گیرنده
-    draw.text((580, y_pos), process_persian("گیرنده:"), 
-              font=fonts['regular'], fill=text_color, anchor='ra')
-    y_pos += line_height
-    
-    customer_name = receiver_info.get('نام مشتری', receiver_info.get('customer_name', 'نامشخص'))
-    draw.text((580, y_pos), process_persian(f"نام: {customer_name}"), 
-              font=fonts['regular'], fill=text_color, anchor='ra')
-    y_pos += line_height
-    
-    # آدرس گیرنده (چندخطی)
-    receiver_address = receiver_info.get('address', receiver_info.get('آدرس کامل', 'نامشخص'))
-    for line in textwrap.wrap(f"آدرس: {receiver_address}", width=40):
-        draw.text((580, y_pos), process_persian(line), 
-                  font=fonts['small'], fill=text_color, anchor='ra')
-        y_pos += line_height - 2
-    
-    # شهر و استان
-    province = receiver_info.get('state', receiver_info.get('استان', ''))
-    city = receiver_info.get('city', receiver_info.get('شهر', ''))
-    postal = receiver_info.get('postalCode', receiver_info.get('کد پستی', ''))
-    
-    location_text = f"استان: {province} - شهر: {city} - کد پستی: {postal}"
-    draw.text((580, y_pos), process_persian(location_text), 
-              font=fonts['small'], fill=text_color, anchor='ra')
-    y_pos += line_height
-    
-    phone = receiver_info.get('phoneNumber', receiver_info.get('شماره تلفن', 'نامشخص'))
-    draw.text((580, y_pos), process_persian(f"تلفن: {phone}"), 
-              font=fonts['regular'], fill=text_color, anchor='ra')
-
-    # ========== بخش محصولات (پایین صفحه) ==========
-    products = receiver_info.get('products', [])
-    
-    if products:
-        y_pos = 390  # شروع از پایین
-        
-        # خط جداکننده
-        separator_y = y_pos - (len(products) * 60)
-        draw.line([(140, separator_y), (580, separator_y)], fill='black', width=2)
-        
-        # رسم هر محصول از پایین به بالا
-        for item in reversed(products):
-            item_name = item.get('name', item.get('product_title', 'نامشخص'))
-            item_qty = int(item.get('qty', item.get('quantity', 1)))
-            
-            # محاسبه ارتفاع مورد نیاز
-            wrapped_lines = textwrap.wrap(item_name, width=35)
-            name_height = len(wrapped_lines) * 18
-            item_height = max(55, name_height + 10)
-            
-            y_pos -= item_height
-            
-            # دایره تعداد
-            circle_x, circle_y = 530, y_pos
-            draw.ellipse(
-                [(circle_x, circle_y), (circle_x + 50, circle_y + 50)],
-                outline='black',
-                width=3
-            )
-            draw.text(
-                (circle_x + 25, circle_y + 25),
-                str(item_qty),
-                font=fonts['large'],
-                fill=text_color,
-                anchor='mm'
-            )
-            
-            # نام محصول (چندخطی)
-            name_y = y_pos + (item_height - name_height) / 2
-            for line in wrapped_lines:
-                draw.text(
-                    (510, name_y),
-                    process_persian(line),
-                    font=fonts['small'],
-                    fill=text_color,
-                    anchor='ra'
-                )
-                name_y += 18
-            
-            y_pos -= 5  # فاصله بین اقلام
-
-    # ========== هشدار چندقلمی ==========
-    if len(products) > 1:
-        draw.rectangle([(230, 5), (470, 35)], fill='#FFD700', outline='#FF8C00', width=2)
-        draw.text(
-            (350, 20),
-            process_persian("⚠️ توجه: سفارش چندقلمی"),
-            font=fonts['warning'],
-            fill='#8B0000',
-            anchor='mm'
+        # تولید برچسب
+        label_img = generate_label_portrait(
+            order_id='123456789',
+            sender_info=sender_info,
+            receiver_info=receiver_info,
+            include_datamatrix=True
         )
+        
+        print("✅ برچسب تولید شد، در حال تبدیل به PNG...")
+        
+        # تبدیل به PNG
+        img_buffer = io.BytesIO()
+        label_img.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        
+        print("✅ PNG آماده است")
+        
+        return StreamingResponse(
+            img_buffer,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": "inline; filename=sample_label.png"
+            }
+        )
+        
+    except Exception as e:
+        print(f"❌ خطا در تولید برچسب نمونه: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"خطا: {str(e)}")
 
-    return label
 
-
-def generate_label_landscape(order_id, sender_info, receiver_info):
-    """تولید برچسب افقی (ساده‌تر)"""
-    label = Image.new('RGB', (400, 600), color='white')
-    draw = ImageDraw.Draw(label)
+@router.post("/generate")
+async def generate_labels(request: GenerateLabelsRequest):
+    """تولید برچسب‌های پستی به صورت PDF"""
     
-    fonts = load_fonts()
+    if not LABEL_CORE_AVAILABLE:
+        raise HTTPException(status_code=500, detail="label_core not available")
     
-    # QR Code
+    if not request.orders:
+        raise HTTPException(status_code=400, detail="لیست سفارشات خالی است")
+    
+    print(f"\n{'='*60}")
+    print(f"🏷️  شروع تولید {len(request.orders)} برچسب")
+    print(f"{'='*60}\n")
+    
+    # بررسی فونت
+    font_path = get_font_path()
+    if not font_path:
+        raise HTTPException(
+            status_code=500,
+            detail="❌ فونت Vazir.ttf پیدا نشد! لطفاً فایل فونت را در روت پروژه قرار دهید."
+        )
+    
+    print(f"✅ فونت پیدا شد: {font_path}\n")
+    
+    # تبدیل اطلاعات فرستنده
+    sender_info = {
+        'name': request.sender.name,
+        'address': request.sender.address,
+        'postal_code': request.sender.postal_code,
+        'phone': request.sender.phone
+    }
+    
+    # تولید برچسب‌ها
+    label_images = []
+    
+    for idx, order in enumerate(request.orders, 1):
+        try:
+            print(f"📦 [{idx}/{len(request.orders)}] پردازش {order.order_code}...")
+            
+            # تبدیل اطلاعات گیرنده
+            receiver_info = {
+                'نام مشتری': order.customer_name,
+                'شهر': order.city,
+                'استان': order.province,
+                'آدرس کامل': order.full_address,
+                'کد پستی': order.postal_code,
+                'شماره تلفن': order.customer_phone,
+                'products': []
+            }
+            
+            # تبدیل اطلاعات محصولات
+            for item in order.items:
+                product_name = item.name or item.product_title or 'نامشخص'
+                product_qty = item.qty or item.quantity or 1
+                
+                receiver_info['products'].append({
+                    'name': product_name,
+                    'qty': product_qty
+                })
+            
+            # تولید برچسب
+            if request.settings.orientation == "portrait":
+                label_img = generate_label_portrait(
+                    order_id=order.order_code,
+                    sender_info=sender_info,
+                    receiver_info=receiver_info,
+                    include_datamatrix=request.settings.include_datamatrix
+                )
+            else:
+                label_img = generate_label_landscape(
+                    order_id=order.order_code,
+                    sender_info=sender_info,
+                    receiver_info=receiver_info
+                )
+            
+            # ذخیره تصویر در BytesIO
+            img_buffer = io.BytesIO()
+            label_img.save(img_buffer, format='PNG')
+            img_buffer.seek(0)
+            label_images.append(img_buffer)
+            
+            print(f"   ✅ برچسب {order.order_code} تولید شد")
+            
+        except Exception as e:
+            print(f"   ❌ خطا در تولید برچسب {order.order_code}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+    
+    if not label_images:
+        raise HTTPException(status_code=500, detail="❌ هیچ برچسبی تولید نشد")
+    
+    print(f"\n✅ {len(label_images)} برچسب تولید شد")
+    print(f"📄 در حال ایجاد PDF...\n")
+    
+    # ایجاد PDF با تابع از utils
     try:
-        qr = qrcode.make(str(order_id)).resize((100, 100))
-        label.paste(qr, (20, 20))
-    except:
-        pass
-    
-    # متن ساده
-    y = 140
-    draw.text((200, y), process_persian(f"سفارش: {order_id}"), 
-              font=fonts['regular'], fill='black', anchor='mm')
-    
-    y += 30
-    customer = receiver_info.get('نام مشتری', 'نامشخص')
-    draw.text((200, y), process_persian(f"مشتری: {customer}"), 
-              font=fonts['regular'], fill='black', anchor='mm')
-    
-    # محصولات
-    products = receiver_info.get('products', [])
-    y += 40
-    for item in products:
-        name = item.get('name', 'نامشخص')
-        qty = item.get('qty', 1)
-        draw.text((200, y), process_persian(f"{name} - {qty} عدد"), 
-                  font=fonts['small'], fill='black', anchor='mm')
-        y += 25
-
-    return label
-
-
-def create_pdf_two_labels(label_images, output_path, page_size):
-    """ایجاد PDF با دو برچسب در هر صفحه"""
-    c = canvas.Canvas(output_path, pagesize=page_size)
-    page_w, page_h = page_size
-    half_h = page_h / 2
-    
-    for i in range(0, len(label_images), 2):
-        # برچسب بالا
-        if i < len(label_images):
-            label_images[i].seek(0)  # بازگشت به ابتدای BytesIO
-            c.drawImage(
-                ImageReader(label_images[i]),
-                0, half_h,
-                width=page_w,
-                height=half_h,
-                preserveAspectRatio=True,
-                anchor='c'
-            )
+        # ایجاد فایل موقت برای PDF
+        import tempfile
+        temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+        temp_path = temp_pdf.name
+        temp_pdf.close()
         
-        # برچسب پایین
-        if i + 1 < len(label_images):
-            label_images[i + 1].seek(0)
-            c.drawImage(
-                ImageReader(label_images[i + 1]),
-                0, 0,
-                width=page_w,
-                height=half_h,
-                preserveAspectRatio=True,
-                anchor='c'
-            )
+        # تولید PDF
+        create_pdf_two_labels(
+            label_images=label_images,
+            output_path=temp_path,
+            page_size=A5
+        )
         
-        c.showPage()
-    
-    c.save()
-    print(f"✅ PDF ذخیره شد: {output_path}")
+        # خواندن PDF
+        with open(temp_path, 'rb') as f:
+            pdf_data = f.read()
+        
+        # حذف فایل موقت
+        os.unlink(temp_path)
+        
+        pdf_buffer = io.BytesIO(pdf_data)
+        
+        # نام فایل
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"labels_{timestamp}.pdf"
+        
+        print(f"✅ PDF ایجاد شد: {filename}")
+        print(f"{'='*60}\n")
+        
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+        
+    except Exception as e:
+        print(f"❌ خطا در ایجاد PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"خطا در ایجاد PDF: {str(e)}")

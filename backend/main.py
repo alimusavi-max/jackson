@@ -10,7 +10,6 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database.models import Order, OrderItem, SenderProfile, SMSLog, Base
-from routers import orders, labels  # 🔥 اضافه کردن labels
 
 # ==================== تنظیمات دیتابیس ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,8 +63,27 @@ def get_db():
         db.close()
 
 # ==================== Include Routers ====================
-app.include_router(orders.router, prefix="/api", tags=["orders"])
-app.include_router(labels.router, prefix="/api", tags=["labels"])  # 🔥 اضافه شد
+print("\n🔧 در حال بارگذاری Routers...")
+
+try:
+    from routers import orders
+    app.include_router(orders.router, prefix="/api", tags=["orders"])
+    print("✅ orders router loaded at /api/orders")
+except Exception as e:
+    print(f"❌ خطا در بارگذاری orders router: {e}")
+    import traceback
+    traceback.print_exc()
+
+try:
+    from routers import labels
+    app.include_router(labels.router, prefix="/api", tags=["labels"])
+    print("✅ labels router loaded at /api/labels")
+except Exception as e:
+    print(f"❌ خطا در بارگذاری labels router: {e}")
+    import traceback
+    traceback.print_exc()
+
+print("✅ تمام routers بارگذاری شدند\n")
 
 # ==================== Routes ====================
 @app.get("/")
@@ -83,7 +101,12 @@ def root():
         "status": "running",
         "db_path": DB_PATH_ABS,
         "db_exists": os.path.exists(DB_PATH_ABS),
-        "orders_count": count
+        "orders_count": count,
+        "endpoints": {
+            "orders": "/api/orders",
+            "labels": "/api/labels",
+            "docs": "/docs"
+        }
     }
 
 @app.get("/api/stats")
@@ -255,4 +278,11 @@ def get_order_detail(order_id: int, db: Session = Depends(get_db)):
 if __name__ == "__main__":
     import uvicorn
     print("\n🚀 در حال اجرای Backend API...\n")
+    print("📍 Endpoints:")
+    print("   - http://localhost:8000/")
+    print("   - http://localhost:8000/docs")
+    print("   - http://localhost:8000/api/orders")
+    print("   - http://localhost:8000/api/labels/test-font")
+    print("   - http://localhost:8000/api/labels/sample")
+    print()
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
