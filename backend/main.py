@@ -83,6 +83,16 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
+# 🔥 اضافه کردن tracking router
+try:
+    from routers import tracking
+    app.include_router(tracking.router, prefix="/api", tags=["tracking"])
+    print("✅ tracking router loaded at /api/tracking")
+except Exception as e:
+    print(f"❌ خطا در بارگذاری tracking router: {e}")
+    import traceback
+    traceback.print_exc()
+
 print("✅ تمام routers بارگذاری شدند\n")
 
 # ==================== Routes ====================
@@ -105,6 +115,7 @@ def root():
         "endpoints": {
             "orders": "/api/orders",
             "labels": "/api/labels",
+            "tracking": "/api/tracking",
             "docs": "/docs"
         }
     }
@@ -282,7 +293,7 @@ if __name__ == "__main__":
     print("   - http://localhost:8000/")
     print("   - http://localhost:8000/docs")
     print("   - http://localhost:8000/api/orders")
+    print("   - http://localhost:8000/api/tracking/test")
     print("   - http://localhost:8000/api/labels/test-font")
-    print("   - http://localhost:8000/api/labels/sample")
     print()
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
