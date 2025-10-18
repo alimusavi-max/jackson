@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { ordersAPI } from '@/lib/api'
-import { Printer, Settings, CheckSquare, Square, Package, Loader2, AlertCircle } from 'lucide-react'
+import { Printer, Settings, CheckSquare, Square, Package, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
 
 interface Order {
   id: number
@@ -15,6 +15,8 @@ interface Order {
   full_address: string
   postal_code: string
   tracking_code: string | null
+  status: string
+  order_date_persian: string
   items_count: number
   total_quantity: number
   items: any[]
@@ -37,13 +39,19 @@ export default function LabelsPage() {
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait')
   const [includeDataMatrix, setIncludeDataMatrix] = useState(true)
   const [includeQRCode, setIncludeQRCode] = useState(true)
+  const [fetchFromAPI, setFetchFromAPI] = useState(true)
+  const [updateDB, setUpdateDB] = useState(true)
   
   // فیلترها
   const [filters, setFilters] = useState({
     search: '',
     city: 'all',
     province: 'all',
-    multiItemOnly: false
+    status: 'all',
+    multiItemOnly: false,
+    hasAddress: 'all',
+    dateFrom: '',
+    dateTo: ''
   })
 
   // پروفایل فرستنده
@@ -68,13 +76,8 @@ export default function LabelsPage() {
       setLoading(true)
       const res = await ordersAPI.getAll({ limit: 1000 })
       
-      const ordersWithAddress = res.data.filter((o: Order) => 
-        o.full_address && 
-        o.full_address !== 'نامشخص' && 
-        o.customer_name
-      )
-      
-      setOrders(ordersWithAddress)
+      // 🔥 حذف فیلتر محدودکننده - همه سفارشات را نشان بده
+      setOrders(res.data)
     } catch (error) {
       console.error('خطا:', error)
       alert('خطا در دریافت سفارشات')
@@ -162,6 +165,8 @@ export default function LabelsPage() {
       
       console.log('🚀 شروع تولید برچسب‌ها...')
       console.log(`📦 تعداد سفارشات: ${selectedOrdersList.length}`)
+      console.log(`🔄 دریافت از API: ${fetchFromAPI}`)
+      console.log(`💾 به‌روزرسانی دیتابیس: ${updateDB}`)
 
       const response = await fetch('http://localhost:8000/api/labels/generate', {
         method: 'POST',
@@ -184,7 +189,8 @@ export default function LabelsPage() {
             orientation,
             include_datamatrix: includeDataMatrix,
             include_qrcode: includeQRCode,
-            fetch_from_api: false
+            fetch_from_api: fetchFromAPI,
+            update_database: updateDB
           }
         })
       })
@@ -211,7 +217,14 @@ export default function LabelsPage() {
       window.URL.revokeObjectURL(url)
 
       console.log('✅ دانلود موفق')
-      alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد و دانلود شد!`)
+      
+      if (updateDB) {
+        alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد شد!\n\n💾 اطلاعات جدید در دیتابیس به‌روزرسانی شد.`)
+        // بارگذاری مجدد سفارشات برای نمایش تغییرات
+        await loadOrders()
+      } else {
+        alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد و دانلود شد!`)
+      }
       
     } catch (error: any) {
       console.error('❌ خطای کامل:', error)
@@ -232,8 +245,9 @@ export default function LabelsPage() {
     }
   }
 
-  // فیلتر کردن سفارشات
+  // 🔥 فیلتر کردن سفارشات با قابلیت‌های جدید
   const filteredOrders = orders.filter(order => {
+    // جستجو
     if (filters.search) {
       const search = filters.search.toLowerCase()
       if (
@@ -245,15 +259,36 @@ export default function LabelsPage() {
       }
     }
 
+    // شهر
     if (filters.city !== 'all' && order.city !== filters.city) return false
+    
+    // استان
     if (filters.province !== 'all' && order.province !== filters.province) return false
+    
+    // 🔥 وضعیت سفارش
+    if (filters.status !== 'all' && order.status !== filters.status) return false
+    
+    // چندقلمی
     if (filters.multiItemOnly && order.items_count <= 1) return false
+    
+    // 🔥 وضعیت آدرس
+    if (filters.hasAddress === 'yes' && (!order.full_address || order.full_address === 'نامشخص')) return false
+    if (filters.hasAddress === 'no' && order.full_address && order.full_address !== 'نامشخص') return false
+
+    // 🔥 فیلتر تاریخ
+    if (filters.dateFrom && order.order_date_persian) {
+      if (order.order_date_persian < filters.dateFrom) return false
+    }
+    if (filters.dateTo && order.order_date_persian) {
+      if (order.order_date_persian > filters.dateTo) return false
+    }
 
     return true
   })
 
   const cities = Array.from(new Set(orders.map(o => o.city).filter(Boolean))).sort()
   const provinces = Array.from(new Set(orders.map(o => o.province).filter(Boolean))).sort()
+  const statuses = Array.from(new Set(orders.map(o => o.status).filter(Boolean))).sort()
 
   if (loading) {
     return (
@@ -280,9 +315,19 @@ export default function LabelsPage() {
               <p className="text-gray-600 mt-1">
                 <span className="font-bold text-blue-600">{selectedOrders.size}</span> از{' '}
                 <span className="font-bold">{filteredOrders.length}</span> سفارش انتخاب شده
+                <span className="text-gray-400 mx-2">|</span>
+                <span className="text-gray-500">کل: {orders.length}</span>
               </p>
             </div>
             <div className="flex gap-3">
+              <button
+                onClick={loadOrders}
+                disabled={loading}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition disabled:opacity-50 flex items-center gap-2"
+              >
+                <RefreshCw size={18} />
+                بارگذاری مجدد
+              </button>
               <button
                 onClick={generateLabels}
                 disabled={selectedOrders.size === 0 || generating}
@@ -313,7 +358,11 @@ export default function LabelsPage() {
               <Loader2 className="animate-spin text-blue-600" size={24} />
               <div>
                 <p className="font-medium text-blue-900">در حال تولید برچسب‌ها...</p>
-                <p className="text-sm text-blue-700">لطفاً صبر کنید، این عملیات ممکن است چند ثانیه طول بکشد.</p>
+                <p className="text-sm text-blue-700">
+                  {fetchFromAPI && '🔄 دریافت اطلاعات از API دیجی‌کالا | '}
+                  {updateDB && '💾 به‌روزرسانی دیتابیس | '}
+                  لطفاً صبر کنید...
+                </p>
               </div>
             </div>
           </div>
@@ -440,7 +489,7 @@ export default function LabelsPage() {
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
             <Settings className="text-purple-600" />
-            تنظیمات برچسب
+            تنظیمات برچسب و دریافت داده
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -495,6 +544,34 @@ export default function LabelsPage() {
                 </label>
               </div>
             </div>
+
+            {/* 🔥 تنظیمات جدید API و دیتابیس */}
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                دریافت و به‌روزرسانی داده
+              </label>
+              <div className="space-y-2 bg-blue-50 p-4 rounded-lg">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={fetchFromAPI}
+                    onChange={(e) => setFetchFromAPI(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span className="text-sm">🔄 دریافت اطلاعات کامل از API دیجی‌کالا (آدرس، تلفن، کد پستی)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={updateDB}
+                    onChange={(e) => setUpdateDB(e.target.checked)}
+                    disabled={!fetchFromAPI}
+                    className="w-4 h-4 text-blue-600 rounded disabled:opacity-50"
+                  />
+                  <span className="text-sm">💾 به‌روزرسانی دیتابیس با اطلاعات جدید (فقط موارد خالی یا نامشخص)</span>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -504,7 +581,7 @@ export default function LabelsPage() {
             🔍 فیلتر سفارشات
           </h3>
           
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
             <input
               type="text"
               placeholder="جستجو..."
@@ -534,6 +611,47 @@ export default function LabelsPage() {
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
+
+            {/* 🔥 فیلتر وضعیت */}
+            <select
+              value={filters.status}
+              onChange={(e) => setFilters({...filters, status: e.target.value})}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">همه وضعیت‌ها</option>
+              {statuses.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+
+            {/* 🔥 فیلتر آدرس */}
+            <select
+              value={filters.hasAddress}
+              onChange={(e) => setFilters({...filters, hasAddress: e.target.value})}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">همه (با/بدون آدرس)</option>
+              <option value="yes">✓ دارای آدرس</option>
+              <option value="no">✗ بدون آدرس</option>
+            </select>
+
+            {/* 🔥 فیلتر تاریخ از */}
+            <input
+              type="text"
+              placeholder="تاریخ از (مثال: 1403/01/01)"
+              value={filters.dateFrom}
+              onChange={(e) => setFilters({...filters, dateFrom: e.target.value})}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+
+            {/* 🔥 فیلتر تاریخ تا */}
+            <input
+              type="text"
+              placeholder="تاریخ تا (مثال: 1403/12/29)"
+              value={filters.dateTo}
+              onChange={(e) => setFilters({...filters, dateTo: e.target.value})}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
 
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -570,15 +688,15 @@ export default function LabelsPage() {
             </button>
             
             <span className="text-sm text-gray-600">
-              {filteredOrders.length} سفارش آماده چاپ برچسب
+              {filteredOrders.length} سفارش نمایش داده شده
             </span>
           </div>
 
           {filteredOrders.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
               <Package size={64} className="mx-auto mb-4 text-gray-300" />
-              <p className="text-xl">هیچ سفارش آماده‌ای یافت نشد</p>
-              <p className="text-sm mt-2">سفارشات باید دارای آدرس کامل باشند</p>
+              <p className="text-xl">هیچ سفارشی با این فیلترها یافت نشد</p>
+              <p className="text-sm mt-2">فیلترها را تغییر دهید یا سفارشات جدید دریافت کنید</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -597,8 +715,10 @@ export default function LabelsPage() {
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">کد سفارش</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">نام مشتری</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">شهر</th>
+                    <th className="px-4 py-3 text-right font-semibold text-gray-700">وضعیت</th>
+                    <th className="px-4 py-3 text-right font-semibold text-gray-700">آدرس</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-700">تعداد کالا</th>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-700">کد پستی</th>
+                    <th className="px-4 py-3 text-right font-semibold text-gray-700">تاریخ</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -607,7 +727,9 @@ export default function LabelsPage() {
                       key={order.id}
                       className={`border-b hover:bg-blue-50 transition cursor-pointer ${
                         selectedOrders.has(order.id) ? 'bg-blue-50' : ''
-                      } ${order.items_count > 1 ? 'bg-yellow-50' : ''}`}
+                      } ${order.items_count > 1 ? 'bg-yellow-50' : ''} ${
+                        !order.full_address || order.full_address === 'نامشخص' ? 'bg-red-50' : ''
+                      }`}
                       onClick={() => toggleOrder(order.id)}
                     >
                       <td className="px-4 py-3">
@@ -632,8 +754,29 @@ export default function LabelsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-700">
-                        <div>{order.city}</div>
+                        <div>{order.city || '-'}</div>
                         <div className="text-xs text-gray-500">{order.province}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
+                          {order.status || 'نامشخص'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {order.full_address && order.full_address !== 'نامشخص' ? (
+                          <span className="text-xs text-green-600 flex items-center gap-1">
+                            ✓ دارد
+                          </span>
+                        ) : (
+                          <span className="text-xs text-red-600 flex items-center gap-1">
+                            ✗ ندارد
+                            {fetchFromAPI && (
+                              <span className="text-blue-600" title="با فعال بودن دریافت از API، اطلاعات کامل می‌شود">
+                                🔄
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <div className="flex items-center justify-center gap-2">
@@ -646,8 +789,8 @@ export default function LabelsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">
-                          {order.postal_code || '-'}
+                        <span className="text-xs text-gray-600">
+                          {order.order_date_persian || '-'}
                         </span>
                       </td>
                     </tr>

@@ -1,8 +1,9 @@
 # backend/routers/labels.py
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 import io
 from datetime import datetime
 import sys
@@ -27,6 +28,18 @@ except ImportError as e:
     print(f"❌ خطا در import utils.label_core: {e}")
     import traceback
     traceback.print_exc()
+
+# Import API core برای دریافت اطلاعات
+try:
+    from utils.api_core import get_customer_info, format_cookies_for_requests, load_session_cookies
+    API_CORE_AVAILABLE = True
+    print("✅ utils.api_core imported successfully")
+except ImportError as e:
+    API_CORE_AVAILABLE = False
+    print(f"❌ خطا در import utils.api_core: {e}")
+
+# Import database models
+from database.models import Order, OrderItem, init_database, get_session
 
 router = APIRouter(prefix="/labels", tags=["Labels"])
 
@@ -60,11 +73,23 @@ class LabelSettings(BaseModel):
     include_datamatrix: bool = True
     include_qrcode: bool = True
     fetch_from_api: bool = False
+    update_database: bool = False
 
 class GenerateLabelsRequest(BaseModel):
     orders: List[OrderData]
     sender: SenderInfo
     settings: LabelSettings
+
+# ========== Database Dependency ==========
+def get_db():
+    """دریافت session دیتابیس"""
+    db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'digikala_sales.db')
+    engine = init_database(db_path)
+    db = get_session(engine)
+    try:
+        yield db
+    finally:
+        db.close()
 
 # ========== Endpoints ==========
 @router.get("/test")
@@ -73,7 +98,8 @@ async def test_labels_api():
     return {
         "status": "ok",
         "message": "Labels API is working!",
-        "label_core_available": LABEL_CORE_AVAILABLE
+        "label_core_available": LABEL_CORE_AVAILABLE,
+        "api_core_available": API_CORE_AVAILABLE
     }
 
 
@@ -169,8 +195,8 @@ async def generate_sample_label():
 
 
 @router.post("/generate")
-async def generate_labels(request: GenerateLabelsRequest):
-    """تولید برچسب‌های پستی به صورت PDF"""
+async def generate_labels(request: GenerateLabelsRequest, db: Session = Depends(get_db)):
+    """تولید برچسب‌های پستی به صورت PDF با قابلیت دریافت از API و به‌روزرسانی دیتابیس"""
     
     if not LABEL_CORE_AVAILABLE:
         raise HTTPException(status_code=500, detail="label_core not available")
@@ -180,6 +206,8 @@ async def generate_labels(request: GenerateLabelsRequest):
     
     print(f"\n{'='*60}")
     print(f"🏷️  شروع تولید {len(request.orders)} برچسب")
+    print(f"🔄 دریافت از API: {request.settings.fetch_from_api}")
+    print(f"💾 به‌روزرسانی DB: {request.settings.update_database}")
     print(f"{'='*60}\n")
     
     # بررسی فونت
@@ -192,6 +220,16 @@ async def generate_labels(request: GenerateLabelsRequest):
     
     print(f"✅ فونت پیدا شد: {font_path}\n")
     
+    # آماده‌سازی کوکی‌ها برای API (اگر نیاز باشد)
+    cookies_dict = None
+    if request.settings.fetch_from_api and API_CORE_AVAILABLE:
+        cookies_list = load_session_cookies()
+        if cookies_list:
+            cookies_dict = format_cookies_for_requests(cookies_list)
+            print("✅ کوکی‌ها برای API آماده شد")
+        else:
+            print("⚠️ کوکی یافت نشد - دریافت از API ممکن نیست")
+    
     # تبدیل اطلاعات فرستنده
     sender_info = {
         'name': request.sender.name,
@@ -202,6 +240,7 @@ async def generate_labels(request: GenerateLabelsRequest):
     
     # تولید برچسب‌ها
     label_images = []
+    updated_orders = []  # برای ذخیره سفارشاتی که باید در DB به‌روزرسانی شوند
     
     for idx, order in enumerate(request.orders, 1):
         try:
@@ -217,6 +256,39 @@ async def generate_labels(request: GenerateLabelsRequest):
                 'شماره تلفن': order.customer_phone,
                 'products': []
             }
+            
+            # 🔥 دریافت اطلاعات از API (اگر فعال باشد)
+            api_data = None
+            if request.settings.fetch_from_api and cookies_dict:
+                print(f"   🔄 دریافت اطلاعات از API برای {order.shipment_id}...")
+                try:
+                    api_data = get_customer_info(order.shipment_id, cookies_dict)
+                    if api_data:
+                        print(f"   ✅ اطلاعات از API دریافت شد")
+                        
+                        # به‌روزرسانی receiver_info با داده‌های API
+                        if api_data.get('address'):
+                            receiver_info['آدرس کامل'] = api_data['address']
+                        if api_data.get('postalCode'):
+                            receiver_info['کد پستی'] = api_data['postalCode']
+                        if api_data.get('phoneNumber'):
+                            receiver_info['شماره تلفن'] = api_data['phoneNumber']
+                        if api_data.get('city'):
+                            receiver_info['شهر'] = api_data['city']
+                        if api_data.get('state'):
+                            receiver_info['استان'] = api_data['state']
+                        
+                        # ذخیره برای به‌روزرسانی دیتابیس
+                        if request.settings.update_database:
+                            updated_orders.append({
+                                'order_code': order.order_code,
+                                'api_data': api_data,
+                                'order_db_id': order.id
+                            })
+                    else:
+                        print(f"   ⚠️ اطلاعات از API دریافت نشد")
+                except Exception as e:
+                    print(f"   ⚠️ خطا در دریافت از API: {e}")
             
             # تبدیل اطلاعات محصولات
             for item in order.items:
@@ -260,6 +332,58 @@ async def generate_labels(request: GenerateLabelsRequest):
     if not label_images:
         raise HTTPException(status_code=500, detail="❌ هیچ برچسبی تولید نشد")
     
+    # 🔥 به‌روزرسانی دیتابیس (اگر فعال باشد)
+    updated_count = 0
+    if request.settings.update_database and updated_orders:
+        print(f"\n💾 به‌روزرسانی {len(updated_orders)} سفارش در دیتابیس...")
+        
+        for update_info in updated_orders:
+            try:
+                # پیدا کردن سفارش در DB
+                db_order = db.query(Order).filter(
+                    Order.id == update_info['order_db_id']
+                ).first()
+                
+                if db_order:
+                    api_data = update_info['api_data']
+                    needs_update = False
+                    
+                    # به‌روزرسانی فقط فیلدهای خالی یا نامشخص
+                    if api_data.get('address') and (not db_order.full_address or db_order.full_address == 'نامشخص'):
+                        db_order.full_address = api_data['address']
+                        needs_update = True
+                    
+                    if api_data.get('postalCode') and (not db_order.postal_code or db_order.postal_code == 'نامشخص'):
+                        db_order.postal_code = api_data['postalCode']
+                        needs_update = True
+                    
+                    if api_data.get('phoneNumber') and (not db_order.customer_phone or db_order.customer_phone == 'نامشخص'):
+                        db_order.customer_phone = api_data['phoneNumber']
+                        needs_update = True
+                    
+                    if api_data.get('city') and (not db_order.city or db_order.city == 'نامشخص'):
+                        db_order.city = api_data['city']
+                        needs_update = True
+                    
+                    if api_data.get('state') and (not db_order.province or db_order.province == 'نامشخص'):
+                        db_order.province = api_data['state']
+                        needs_update = True
+                    
+                    if needs_update:
+                        db_order.updated_at = datetime.utcnow()
+                        updated_count += 1
+                        print(f"   ✅ سفارش {update_info['order_code']} به‌روزرسانی شد")
+                
+            except Exception as e:
+                print(f"   ⚠️ خطا در به‌روزرسانی {update_info['order_code']}: {e}")
+        
+        try:
+            db.commit()
+            print(f"\n✅ {updated_count} سفارش در دیتابیس به‌روزرسانی شد")
+        except Exception as e:
+            db.rollback()
+            print(f"❌ خطا در commit: {e}")
+    
     print(f"\n✅ {len(label_images)} برچسب تولید شد")
     print(f"📄 در حال ایجاد PDF...\n")
     
@@ -292,6 +416,8 @@ async def generate_labels(request: GenerateLabelsRequest):
         filename = f"labels_{timestamp}.pdf"
         
         print(f"✅ PDF ایجاد شد: {filename}")
+        if updated_count > 0:
+            print(f"💾 {updated_count} سفارش در دیتابیس به‌روزرسانی شد")
         print(f"{'='*60}\n")
         
         return StreamingResponse(
