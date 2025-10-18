@@ -65,6 +65,17 @@ def get_db():
 # ==================== Include Routers ====================
 print("\n🔧 در حال بارگذاری Routers...")
 
+# 🔥 اضافه کردن sender_profiles router
+try:
+    from routers import sender_profiles
+    app.include_router(sender_profiles.router, prefix="/api", tags=["sender-profiles"])
+    print("✅ sender_profiles router loaded at /api/sender-profiles")
+except Exception as e:
+    print(f"❌ خطا در بارگذاری sender_profiles router: {e}")
+    import traceback
+    traceback.print_exc()
+    
+    
 try:
     from routers import orders
     app.include_router(orders.router, prefix="/api", tags=["orders"])

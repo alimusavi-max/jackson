@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { ordersAPI } from '@/lib/api'
-import { Printer, Settings, CheckSquare, Square, Package, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
+import { Printer, Settings, CheckSquare, Square, Package, Loader2, AlertCircle, RefreshCw, Save, Trash2 } from 'lucide-react'
 
 interface Order {
   id: number
@@ -54,10 +54,8 @@ export default function LabelsPage() {
     dateTo: ''
   })
 
-  // پروفایل فرستنده
-  const [senderProfiles, setSenderProfiles] = useState<Record<string, SenderProfile>>({
-    'default': { name: '', address: '', postal_code: '', phone: '' }
-  })
+  // 🔥 پروفایل‌های فرستنده - با localStorage
+  const [senderProfiles, setSenderProfiles] = useState<Record<string, SenderProfile>>({})
   const [selectedProfile, setSelectedProfile] = useState<string>('default')
   const [currentSender, setCurrentSender] = useState<SenderProfile>({
     name: '',
@@ -67,16 +65,55 @@ export default function LabelsPage() {
   })
   const [newProfileName, setNewProfileName] = useState('')
 
+  // بارگذاری اولیه
   useEffect(() => {
     loadOrders()
+    loadProfilesFromStorage()
   }, [])
+
+  // 🔥 بارگذاری پروفایل‌ها از localStorage
+  const loadProfilesFromStorage = () => {
+    try {
+      const saved = localStorage.getItem('sender_profiles')
+      if (saved) {
+        const profiles = JSON.parse(saved)
+        setSenderProfiles(profiles)
+        
+        // اگر پروفایل default وجود داشت، آن را بارگذاری کن
+        if (profiles.default) {
+          setCurrentSender(profiles.default)
+        }
+      } else {
+        // اگر هیچ پروفایلی نبود، یک پروفایل پیش‌فرض ایجاد کن
+        const defaultProfiles = {
+          'default': {
+            name: '',
+            address: '',
+            postal_code: '',
+            phone: ''
+          }
+        }
+        setSenderProfiles(defaultProfiles)
+        localStorage.setItem('sender_profiles', JSON.stringify(defaultProfiles))
+      }
+    } catch (error) {
+      console.error('خطا در بارگذاری پروفایل‌ها:', error)
+    }
+  }
+
+  // 🔥 ذخیره پروفایل‌ها در localStorage
+  const saveProfilesToStorage = (profiles: Record<string, SenderProfile>) => {
+    try {
+      localStorage.setItem('sender_profiles', JSON.stringify(profiles))
+    } catch (error) {
+      console.error('خطا در ذخیره پروفایل‌ها:', error)
+    }
+  }
 
   const loadOrders = async () => {
     try {
       setLoading(true)
       const res = await ordersAPI.getAll({ limit: 1000 })
-      
-      // 🔥 حذف فیلتر محدودکننده - همه سفارشات را نشان بده
       setOrders(res.data)
     } catch (error) {
       console.error('خطا:', error)
@@ -86,9 +123,15 @@ export default function LabelsPage() {
     }
   }
 
+  // 🔥 ذخیره پروفایل جدید
   const saveProfile = () => {
     if (!newProfileName.trim()) {
       alert('⚠️ لطفاً نام پروفایل را وارد کنید')
+      return
+    }
+
+    if (!currentSender.name || !currentSender.address) {
+      alert('⚠️ لطفاً حداقل نام و آدرس فرستنده را وارد کنید')
       return
     }
 
@@ -98,11 +141,13 @@ export default function LabelsPage() {
     }
     
     setSenderProfiles(updatedProfiles)
+    saveProfilesToStorage(updatedProfiles)
     setSelectedProfile(newProfileName)
-    alert(`✅ پروفایل "${newProfileName}" ذخیره شد`)
     setNewProfileName('')
+    alert(`✅ پروفایل "${newProfileName}" ذخیره شد`)
   }
 
+  // 🔥 حذف پروفایل
   const deleteProfile = (profileName: string) => {
     if (profileName === 'default') {
       alert('⚠️ نمی‌توانید پروفایل پیش‌فرض را حذف کنید')
@@ -117,16 +162,24 @@ export default function LabelsPage() {
     delete updatedProfiles[profileName]
     
     setSenderProfiles(updatedProfiles)
+    saveProfilesToStorage(updatedProfiles)
     
     if (selectedProfile === profileName) {
       setSelectedProfile('default')
       setCurrentSender(updatedProfiles.default || { name: '', address: '', postal_code: '', phone: '' })
     }
+    
+    alert(`✅ پروفایل "${profileName}" حذف شد`)
   }
 
+  // 🔥 انتخاب پروفایل
   const selectProfile = (profileName: string) => {
     setSelectedProfile(profileName)
-    setCurrentSender(senderProfiles[profileName] || { name: '', address: '', postal_code: '', phone: '' })
+    if (profileName && senderProfiles[profileName]) {
+      setCurrentSender(senderProfiles[profileName])
+    } else {
+      setCurrentSender({ name: '', address: '', postal_code: '', phone: '' })
+    }
   }
 
   const toggleOrder = (orderId: number) => {
@@ -203,7 +256,6 @@ export default function LabelsPage() {
         throw new Error(`خطا در سرور: ${response.status}`)
       }
 
-      // دانلود PDF
       const blob = await response.blob()
       console.log(`📄 حجم PDF: ${(blob.size / 1024).toFixed(2)} KB`)
       
@@ -220,7 +272,6 @@ export default function LabelsPage() {
       
       if (updateDB) {
         alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد شد!\n\n💾 اطلاعات جدید در دیتابیس به‌روزرسانی شد.`)
-        // بارگذاری مجدد سفارشات برای نمایش تغییرات
         await loadOrders()
       } else {
         alert(`✅ ${selectedOrders.size} برچسب با موفقیت ایجاد و دانلود شد!`)
@@ -245,9 +296,7 @@ export default function LabelsPage() {
     }
   }
 
-  // 🔥 فیلتر کردن سفارشات با قابلیت‌های جدید
   const filteredOrders = orders.filter(order => {
-    // جستجو
     if (filters.search) {
       const search = filters.search.toLowerCase()
       if (
@@ -259,23 +308,14 @@ export default function LabelsPage() {
       }
     }
 
-    // شهر
     if (filters.city !== 'all' && order.city !== filters.city) return false
-    
-    // استان
     if (filters.province !== 'all' && order.province !== filters.province) return false
-    
-    // 🔥 وضعیت سفارش
     if (filters.status !== 'all' && order.status !== filters.status) return false
-    
-    // چندقلمی
     if (filters.multiItemOnly && order.items_count <= 1) return false
     
-    // 🔥 وضعیت آدرس
     if (filters.hasAddress === 'yes' && (!order.full_address || order.full_address === 'نامشخص')) return false
     if (filters.hasAddress === 'no' && order.full_address && order.full_address !== 'نامشخص') return false
 
-    // 🔥 فیلتر تاریخ
     if (filters.dateFrom && order.order_date_persian) {
       if (order.order_date_persian < filters.dateFrom) return false
     }
@@ -350,7 +390,6 @@ export default function LabelsPage() {
         </div>
       </header>
 
-      {/* هشدار در صورت generating */}
       {generating && (
         <div className="bg-blue-50 border-b border-blue-200">
           <div className="max-w-7xl mx-auto px-6 py-4">
@@ -377,12 +416,11 @@ export default function LabelsPage() {
             اطلاعات فرستنده
           </h2>
 
-          {/* هشدار */}
           <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-3">
             <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={20} />
             <div className="text-sm text-yellow-900">
               <p className="font-semibold mb-1">⚠️ مهم:</p>
-              <p>لطفاً اطلاعات فرستنده را با دقت وارد کنید. این اطلاعات روی برچسب پستی چاپ می‌شود.</p>
+              <p>اطلاعات فرستنده روی برچسب پستی چاپ می‌شود. می‌توانید پروفایل‌های مختلف ذخیره کنید.</p>
             </div>
           </div>
 
@@ -390,7 +428,7 @@ export default function LabelsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                انتخاب پروفایل
+                انتخاب پروفایل ذخیره شده
               </label>
               <select
                 value={selectedProfile}
@@ -407,9 +445,10 @@ export default function LabelsPage() {
               <div className="flex items-end">
                 <button
                   onClick={() => deleteProfile(selectedProfile)}
-                  className="w-full px-4 py-2.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
+                  className="w-full px-4 py-2.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition flex items-center justify-center gap-2"
                 >
-                  🗑️ حذف پروفایل
+                  <Trash2 size={18} />
+                  حذف پروفایل
                 </button>
               </div>
             )}
@@ -467,7 +506,7 @@ export default function LabelsPage() {
             </div>
           </div>
 
-          {/* ذخیره پروفایل */}
+          {/* ذخیره پروفایل جدید */}
           <div className="flex gap-3">
             <input
               type="text"
@@ -478,9 +517,10 @@ export default function LabelsPage() {
             />
             <button
               onClick={saveProfile}
-              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
+              className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium flex items-center gap-2"
             >
-              💾 ذخیره پروفایل
+              <Save size={18} />
+              ذخیره پروفایل
             </button>
           </div>
         </div>
@@ -545,7 +585,6 @@ export default function LabelsPage() {
               </div>
             </div>
 
-            {/* 🔥 تنظیمات جدید API و دیتابیس */}
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 دریافت و به‌روزرسانی داده
@@ -612,7 +651,6 @@ export default function LabelsPage() {
               ))}
             </select>
 
-            {/* 🔥 فیلتر وضعیت */}
             <select
               value={filters.status}
               onChange={(e) => setFilters({...filters, status: e.target.value})}
@@ -624,7 +662,6 @@ export default function LabelsPage() {
               ))}
             </select>
 
-            {/* 🔥 فیلتر آدرس */}
             <select
               value={filters.hasAddress}
               onChange={(e) => setFilters({...filters, hasAddress: e.target.value})}
@@ -635,7 +672,6 @@ export default function LabelsPage() {
               <option value="no">✗ بدون آدرس</option>
             </select>
 
-            {/* 🔥 فیلتر تاریخ از */}
             <input
               type="text"
               placeholder="تاریخ از (مثال: 1403/01/01)"
@@ -644,7 +680,6 @@ export default function LabelsPage() {
               className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
 
-            {/* 🔥 فیلتر تاریخ تا */}
             <input
               type="text"
               placeholder="تاریخ تا (مثال: 1403/12/29)"
