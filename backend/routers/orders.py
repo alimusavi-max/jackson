@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
 import pandas as pd
-from typing import Optional
+from typing import Optional, List
+import requests
 
 # Import از ماژول‌های پروژه
 from database.models import Order, OrderItem, Base, init_database, get_session
@@ -14,6 +15,9 @@ router = APIRouter()
 # ========== Pydantic Models ==========
 class SyncOrdersRequest(BaseModel):
     fetch_full_details: bool = False
+
+class ConfirmOrdersRequest(BaseModel):
+    shipment_ids: Optional[List[int]] = None  # اگر خالی باشه، همه سفارشات جدید رو تایید می‌کنه
 
 # ========== Dependency ==========
 def get_db():
@@ -27,30 +31,58 @@ def get_db():
     finally:
         db.close()
 
+# ========== تابع کمکی برای ارسال درخواست تایید ==========
+def send_confirm_request(shipment_id: int, cookies_dict: dict) -> tuple[bool, str]:
+    """ارسال درخواست تایید به API دیجی‌کالا"""
+    url = "https://seller.digikala.com/api/v2/ship-by-seller-orders/update-status"
+    
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-GB,en;q=0.9,fa-IR;q=0.8,fa;q=0.7,en-US;q=0.6",
+        "content-type": "application/json",
+        "origin": "https://seller.digikala.com",
+        "referer": "https://seller.digikala.com/pwa/orders/ship-by-seller",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    
+    payload = {
+        "order_shipment_id": int(shipment_id),
+        "new_status": "processing"
+    }
+    
+    try:
+        response = requests.put(
+            url,
+            json=payload,
+            headers=headers,
+            cookies=cookies_dict,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return True, "تایید شد"
+        else:
+            return False, f"خطای {response.status_code}"
+    
+    except Exception as e:
+        return False, str(e)
+
 # ========== Endpoints ==========
 @router.post("/orders/sync")
 async def sync_orders_from_api(
     request: SyncOrdersRequest,
     db: Session = Depends(get_db)
 ):
-    """
-    همگام‌سازی سفارشات از API دیجی‌کالا
-    """
+    """همگام‌سازی سفارشات از API دیجی‌کالا"""
     try:
-        # Import توابع utils
         from utils.api_core import get_all_orders, orders_to_dataframe, load_session_cookies, format_cookies_for_requests
         
         print("\n🔄 شروع همگام‌سازی...")
         
-        # دریافت سفارشات از Ship-by-Seller
-        print("📡 دریافت از Ship-by-Seller...")
         orders_sbs = get_all_orders(use_ship_by_seller=True)
-        
-        # دریافت از Marketplace
         print("📡 دریافت از Marketplace...")
         orders_mp = get_all_orders(use_ship_by_seller=False)
         
-        # ترکیب و حذف تکراری
         all_orders_dict = {o['shipmentId']: o for o in orders_sbs}
         all_orders_dict.update({o['shipmentId']: o for o in orders_mp})
         
@@ -60,13 +92,12 @@ async def sync_orders_from_api(
         if total_fetched == 0:
             return {
                 "success": False,
-                "message": "هیچ سفارش جدیدی از API دریافت نشد. لطفاً کوکی‌ها را بررسی کنید.",
+                "message": "هیچ سفارش جدیدی از API دریافت نشد",
                 "new_orders": 0,
                 "updated_orders": 0,
                 "total": 0
             }
         
-        # تبدیل به DataFrame
         print("🔄 پردازش داده‌ها...")
         
         cookies_list = load_session_cookies()
@@ -92,7 +123,6 @@ async def sync_orders_from_api(
         
         print("💾 ذخیره در دیتابیس...")
         
-        # گروه‌بندی بر اساس شناسه محموله (سفارشات چندقلمی)
         grouped = fresh_df.groupby('شناسه محموله')
         
         for shipment_id_raw, group in grouped:
@@ -101,11 +131,9 @@ async def sync_orders_from_api(
             if not shipment_id:
                 continue
             
-            # بررسی وجود سفارش
             existing_order = db.query(Order).filter_by(shipment_id=shipment_id).first()
             
             if existing_order:
-                # به‌روزرسانی سفارش موجود
                 first_row = group.iloc[0]
                 existing_order.status = first_row.get('وضعیت', existing_order.status)
                 if first_row.get('کد رهگیری') and first_row.get('کد رهگیری') != 'نامشخص':
@@ -113,22 +141,18 @@ async def sync_orders_from_api(
                 existing_order.updated_at = datetime.utcnow()
                 updated_count += 1
                 
-                # به‌روزرسانی آیتم‌های موجود یا افزودن جدید
                 for _, row in group.iterrows():
                     product_code = normalize_id(row.get('کد محصول (DKP)', ''))
                     
-                    # چک کردن آیتم موجود
                     existing_item = db.query(OrderItem).filter_by(
                         order_id=existing_order.id,
                         product_code=product_code
                     ).first()
                     
                     if existing_item:
-                        # به‌روزرسانی آیتم
                         existing_item.quantity = int(row.get('تعداد', 1)) if pd.notna(row.get('تعداد')) else 1
                         existing_item.price = float(row.get('مبلغ', 0)) if pd.notna(row.get('مبلغ')) else 0
                     else:
-                        # افزودن آیتم جدید
                         new_item = OrderItem(
                             order_id=existing_order.id,
                             product_title=row.get('عنوان سفارش', ''),
@@ -139,7 +163,6 @@ async def sync_orders_from_api(
                         )
                         db.add(new_item)
             else:
-                # ایجاد سفارش جدید
                 first_row = group.iloc[0]
                 
                 order = Order(
@@ -158,7 +181,6 @@ async def sync_orders_from_api(
                 db.add(order)
                 db.flush()
                 
-                # افزودن تمام آیتم‌های سفارش (چندقلمی)
                 for _, row in group.iterrows():
                     item = OrderItem(
                         order_id=order.id,
@@ -172,7 +194,6 @@ async def sync_orders_from_api(
                 
                 new_count += 1
                 
-                # نمایش اطلاعات سفارش چندقلمی
                 if len(group) > 1:
                     print(f"   📦 سفارش چندقلمی: {shipment_id} ({len(group)} قلم)")
         
@@ -210,5 +231,118 @@ async def sync_orders_from_api(
             "message": f"خطا در همگام‌سازی: {str(e)}",
             "new_orders": 0,
             "updated_orders": 0,
+            "total": 0
+        }
+
+
+@router.post("/orders/confirm-new")
+async def confirm_new_orders(
+    request: ConfirmOrdersRequest = ConfirmOrdersRequest(),
+    db: Session = Depends(get_db)
+):
+    """
+    تایید سفارشات جدید (تغییر وضعیت به processing)
+    اگر shipment_ids خالی باشد، همه سفارشات با وضعیت "سفارش جدید" تایید می‌شوند
+    """
+    try:
+        from utils.api_core import load_session_cookies, format_cookies_for_requests
+        
+        print("\n✅ شروع تایید سفارشات جدید...")
+        
+        # بارگذاری کوکی‌ها
+        cookies_list = load_session_cookies()
+        if not cookies_list:
+            return {
+                "success": False,
+                "message": "کوکی‌ها یافت نشد. لطفاً ابتدا وارد سیستم شوید.",
+                "confirmed": 0,
+                "failed": 0,
+                "total": 0
+            }
+        
+        cookies_dict = format_cookies_for_requests(cookies_list)
+        
+        # پیدا کردن سفارشات
+        if request.shipment_ids:
+            # تایید سفارشات خاص
+            orders = db.query(Order).filter(
+                Order.shipment_id.in_([str(sid) for sid in request.shipment_ids])
+            ).all()
+        else:
+            # تایید همه سفارشات جدید
+            orders = db.query(Order).filter(
+                Order.status.in_(['سفارش جدید', 'new', 'New Order'])
+            ).all()
+        
+        if not orders:
+            return {
+                "success": True,
+                "message": "هیچ سفارش جدیدی برای تایید یافت نشد",
+                "confirmed": 0,
+                "failed": 0,
+                "total": 0
+            }
+        
+        print(f"📦 تعداد سفارشات برای تایید: {len(orders)}")
+        
+        confirmed_count = 0
+        failed_count = 0
+        results = []
+        
+        for order in orders:
+            print(f"   🔄 تایید {order.shipment_id}...", end=" ")
+            
+            success, message = send_confirm_request(
+                int(order.shipment_id),
+                cookies_dict
+            )
+            
+            if success:
+                # به‌روزرسانی وضعیت در دیتابیس
+                order.status = "در حال پردازش"
+                order.updated_at = datetime.utcnow()
+                confirmed_count += 1
+                print("✅")
+                
+                results.append({
+                    "shipment_id": order.shipment_id,
+                    "order_code": order.order_code,
+                    "success": True,
+                    "message": "تایید شد"
+                })
+            else:
+                failed_count += 1
+                print(f"❌ {message}")
+                
+                results.append({
+                    "shipment_id": order.shipment_id,
+                    "order_code": order.order_code,
+                    "success": False,
+                    "message": message
+                })
+        
+        db.commit()
+        
+        print(f"\n✅ تایید کامل: {confirmed_count} موفق، {failed_count} ناموفق")
+        
+        return {
+            "success": True,
+            "message": f"{confirmed_count} سفارش تایید شد، {failed_count} ناموفق",
+            "confirmed": confirmed_count,
+            "failed": failed_count,
+            "total": len(orders),
+            "results": results
+        }
+    
+    except Exception as e:
+        print(f"❌ خطا در تایید: {e}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        return {
+            "success": False,
+            "message": f"خطا در تایید سفارشات: {str(e)}",
+            "confirmed": 0,
+            "failed": 0,
             "total": 0
         }

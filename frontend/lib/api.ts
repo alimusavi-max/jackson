@@ -16,6 +16,8 @@ export const ordersAPI = {
   getStats: () => api.get('/stats'),
   sync: (fetchDetails: boolean) => 
     api.post('/orders/sync', { fetch_full_details: fetchDetails }),
+  confirmNew: (shipmentIds?: number[]) =>
+    api.post('/orders/confirm-new', { shipment_ids: shipmentIds }),
 }
 
 export const smsAPI = {

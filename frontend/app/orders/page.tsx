@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { ordersAPI } from '@/lib/api'
+import { CheckCircle2 } from 'lucide-react'
 
 interface OrderItem {
   id: number
@@ -26,7 +27,7 @@ interface Order {
   tracking_code: string | null
   order_date_persian: string
   items_count: number
-  total_quantity: number  // 🔥 تعداد کل واقعی
+  total_quantity: number
   total_amount: number
   items: OrderItem[]
 }
@@ -36,6 +37,8 @@ export default function OrdersPage() {
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   
   const [filters, setFilters] = useState({
     search: '',
@@ -45,7 +48,7 @@ export default function OrdersPage() {
     has_tracking: 'all',
     has_address: 'all',
     has_phone: 'all',
-    multi_item_only: false  // 🔥 فیلتر سفارشات چندقلمی
+    multi_item_only: false
   })
 
   useEffect(() => {
@@ -60,13 +63,82 @@ export default function OrdersPage() {
     try {
       setLoading(true)
       const res = await ordersAPI.getAll({ limit: 1000 })
-      console.log('📦 نمونه سفارش:', res.data[0])
       setOrders(res.data)
     } catch (error) {
       console.error('خطا:', error)
       alert('خطا در دریافت سفارشات')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSync = async () => {
+    if (!confirm('⚠️ آیا مطمئن هستید؟\n\nاین عملیات ممکن است چند دقیقه طول بکشد.')) {
+      return
+    }
+    
+    try {
+      setSyncing(true)
+      const response = await ordersAPI.sync(false)
+      
+      if (response.data.success) {
+        alert(`✅ همگام‌سازی موفق!\n\n` +
+          `📦 سفارشات جدید: ${response.data.new_orders}\n` +
+          `🔄 به‌روزرسانی شده: ${response.data.updated_orders}\n` +
+          `📊 مجموع: ${response.data.total}`)
+        await loadOrders()
+      } else {
+        alert(`❌ خطا:\n\n${response.data.message}`)
+      }
+    } catch (error: any) {
+      console.error('خطا:', error)
+      alert(`❌ خطا:\n\n${error.response?.data?.message || error.message}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const handleConfirmNewOrders = async () => {
+    const newOrders = orders.filter(o => 
+      o.status === 'سفارش جدید' || 
+      o.status === 'new' || 
+      o.status === 'New Order'
+    )
+    
+    if (newOrders.length === 0) {
+      alert('⚠️ هیچ سفارش جدیدی برای تایید وجود ندارد')
+      return
+    }
+    
+    if (!confirm(`⚠️ آیا مطمئن هستید؟\n\n${newOrders.length} سفارش جدید تایید خواهد شد.\nاین عملیات وضعیت سفارشات را در دیجی‌کالا تغییر می‌دهد.`)) {
+      return
+    }
+    
+    try {
+      setConfirming(true)
+      
+      const response = await fetch('http://localhost:8000/api/orders/confirm-new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        alert(`✅ تایید موفق!\n\n` +
+          `✓ تایید شده: ${data.confirmed}\n` +
+          `✗ ناموفق: ${data.failed}\n` +
+          `📊 مجموع: ${data.total}`)
+        await loadOrders()
+      } else {
+        alert(`❌ خطا:\n\n${data.message}`)
+      }
+    } catch (error: any) {
+      console.error('خطا:', error)
+      alert(`❌ خطا در تایید سفارشات:\n\n${error.message}`)
+    } finally {
+      setConfirming(false)
     }
   }
 
@@ -126,7 +198,6 @@ export default function OrdersPage() {
       result = result.filter(order => !order.customer_phone || order.customer_phone === 'نامشخص')
     }
 
-    // 🔥 فیلتر سفارشات چندقلمی
     if (filters.multi_item_only) {
       result = result.filter(order => order.items_count > 1)
     }
@@ -147,9 +218,13 @@ export default function OrdersPage() {
     })
   }
 
-  // 🔥 آمار سفارشات چندقلمی
   const multiItemOrders = orders.filter(o => o.items_count > 1).length
   const totalItems = orders.reduce((sum, o) => sum + (o.total_quantity || 0), 0)
+  const newOrdersCount = orders.filter(o => 
+    o.status === 'سفارش جدید' || 
+    o.status === 'new' || 
+    o.status === 'New Order'
+  ).length
 
   const cities = Array.from(new Set(orders.map(o => o.city).filter(Boolean))).sort()
   const provinces = Array.from(new Set(orders.map(o => o.province).filter(Boolean))).sort()
@@ -181,16 +256,45 @@ export default function OrdersPage() {
                 <span className="text-purple-600">
                   📦 {totalItems} کالا
                 </span>
+                {newOrdersCount > 0 && (
+                  <>
+                    <span className="text-gray-400">|</span>
+                    <span className="text-green-600">
+                      🆕 {newOrdersCount} سفارش جدید
+                    </span>
+                  </>
+                )}
               </div>
             </div>
             <div className="flex gap-3">
+              {/* دکمه تایید سفارشات جدید */}
               <button 
-                onClick={loadOrders}
-                disabled={loading}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                onClick={handleConfirmNewOrders}
+                disabled={confirming || newOrdersCount === 0}
+                className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                {loading ? '⏳ در حال بارگذاری...' : '🔄 بارگذاری مجدد'}
+                {confirming ? (
+                  <>
+                    <span className="animate-spin">⏳</span>
+                    در حال تایید...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={20} />
+                    تایید سفارشات جدید ({newOrdersCount})
+                  </>
+                )}
               </button>
+              
+              {/* دکمه همگام‌سازی */}
+              <button 
+                onClick={handleSync}
+                disabled={syncing}
+                className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {syncing ? '⏳ در حال همگام‌سازی...' : '🔄 همگام‌سازی'}
+              </button>
+              
               <button 
                 onClick={resetFilters}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
@@ -309,7 +413,6 @@ export default function OrdersPage() {
               </select>
             </div>
 
-            {/* 🔥 فیلتر جدید: سفارشات چندقلمی */}
             <div className="flex items-end">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -366,11 +469,12 @@ export default function OrdersPage() {
                     const isExpanded = expandedRows.has(order.id)
                     const orderItems = order.items || []
                     const hasMultipleItems = orderItems.length > 1
+                    const isNewOrder = order.status === 'سفارش جدید' || order.status === 'new' || order.status === 'New Order'
                     
                     return (
                       <React.Fragment key={order.id}>
                         {/* ردیف اصلی */}
-                        <tr className={`border-b hover:bg-blue-50 transition cursor-pointer ${hasMultipleItems ? 'bg-yellow-50' : ''}`} onClick={() => toggleRow(order.id)}>
+                        <tr className={`border-b hover:bg-blue-50 transition cursor-pointer ${hasMultipleItems ? 'bg-yellow-50' : ''} ${isNewOrder ? 'bg-green-50' : ''}`} onClick={() => toggleRow(order.id)}>
                           <td className="px-4 py-3">
                             <button
                               onClick={(e) => {
@@ -399,7 +503,11 @@ export default function OrdersPage() {
                             {order.city || '-'}
                           </td>
                           <td className="px-4 py-3">
-                            <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              isNewOrder 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-blue-100 text-blue-800'
+                            }`}>
                               {order.status || 'نامشخص'}
                             </span>
                           </td>
@@ -424,7 +532,6 @@ export default function OrdersPage() {
                               )}
                             </div>
                           </td>
-                          {/* 🔥 نمایش تعداد کل واقعی */}
                           <td className="px-4 py-3 text-center">
                             <span className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-bold">
                               {order.total_quantity || order.items_count} عدد
@@ -435,13 +542,13 @@ export default function OrdersPage() {
                           </td>
                         </tr>
 
-                        {/* ردیف جزئیات (منوی کشویی) */}
+                        {/* ردیف جزئیات */}
                         {isExpanded && (
                           <tr className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2">
                             <td colSpan={10} className="px-4 py-4">
                               {orderItems.length > 0 ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                  {/* اطلاعات تماس و آدرس */}
+                                  {/* اطلاعات تماس */}
                                   <div className="space-y-3">
                                     <h4 className="font-bold text-gray-900 flex items-center gap-2 mb-3">
                                       📞 اطلاعات تماس و آدرس
@@ -468,7 +575,7 @@ export default function OrdersPage() {
                                     </div>
                                   </div>
 
-                                  {/* محصولات سفارش */}
+                                  {/* محصولات */}
                                   <div>
                                     <h4 className="font-bold text-gray-900 flex items-center gap-2 mb-3">
                                       🛒 محصولات سفارش ({orderItems.length} قلم)
@@ -491,14 +598,12 @@ export default function OrdersPage() {
                                             </div>
                                             <div className="flex items-center gap-4 text-xs text-gray-600 flex-wrap">
                                               <span className="font-mono">کد: {item.product_code}</span>
-                                              {/* 🔥 نمایش تعداد هر محصول */}
                                               <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-bold">
                                                 {item.quantity} عدد
                                               </span>
                                               <span className="font-bold text-green-700">
                                                 {item.price.toLocaleString('fa-IR')} تومان
                                               </span>
-                                              {/* 🔥 جمع قیمت × تعداد */}
                                               <span className="text-gray-500">
                                                 = {(item.price * item.quantity).toLocaleString('fa-IR')} تومان
                                               </span>
