@@ -2,9 +2,11 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Table, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from database.models import Base
 import enum
 import hashlib
+
+# 🔥 CRITICAL: import Base از models بدون هیچ dependency دیگه
+from database.models import Base
 
 # جدول رابطه چند به چند بین کاربر و نقش
 user_roles = Table(
@@ -68,8 +70,6 @@ class PermissionType(str, enum.Enum):
     SETTINGS_VIEW = "settings_view"
     SETTINGS_EDIT = "settings_edit"
 
-# backend/database/auth_models.py
-# ... (کل فایل رو حفظ کن، فقط بخش User رو اصلاح کن)
 
 class User(Base):
     """مدل کاربر"""
@@ -91,7 +91,7 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime)
     
-    # Relations - 🔥 حذف created_orders چون مشکل circular import داره
+    # Relations
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     
     def has_permission(self, permission: str) -> bool:
@@ -100,16 +100,17 @@ class User(Base):
             return True
         return any(role.has_permission(permission) for role in self.roles)
 
+
 class Role(Base):
     """نقش کاربری"""
     __tablename__ = 'roles'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(50), unique=True, nullable=False)  # مثلا: admin, sales_manager, warehouse_staff
-    display_name = Column(String(100), nullable=False)  # نام فارسی
+    name = Column(String(50), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=False)
     description = Column(String(500))
     
-    is_system = Column(Boolean, default=False)  # نقش‌های سیستمی قابل حذف نیستند
+    is_system = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relations
@@ -126,9 +127,9 @@ class Permission(Base):
     __tablename__ = 'permissions'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), unique=True, nullable=False)  # sales_view, warehouse_edit, etc
-    display_name = Column(String(100), nullable=False)  # نام فارسی
-    category = Column(String(50))  # sales, warehouse, admin, etc
+    name = Column(String(100), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=False)
+    category = Column(String(50))
     description = Column(String(500))
     
     # Relations
@@ -136,20 +137,20 @@ class Permission(Base):
 
 
 class AuditLog(Base):
-    """لاگ فعالیت‌های کاربران (برای امنیت و پیگیری)"""
+    """لاگ فعالیت‌های کاربران"""
     __tablename__ = 'audit_logs'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('users.id'))
-    action = Column(String(100))  # login, create_order, delete_product, etc
-    entity_type = Column(String(50))  # order, product, user, etc
+    action = Column(String(100))
+    entity_type = Column(String(50))
     entity_id = Column(String(100))
-    details = Column(String(1000))  # JSON string
+    details = Column(String(1000))
     ip_address = Column(String(50))
     user_agent = Column(String(500))
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    user = relationship("User")
+    # 🔥 CRITICAL: بدون relationship به User برای جلوگیری از circular import
 
 
 # ==================== توابع کمکی ====================
@@ -228,7 +229,6 @@ def create_default_roles(session):
             description="دسترسی کامل به تمام بخش‌ها",
             is_system=True
         )
-        # اضافه کردن همه مجوزها
         all_permissions = session.query(Permission).all()
         admin_role.permissions = all_permissions
         session.add(admin_role)
@@ -283,38 +283,19 @@ def create_default_roles(session):
         warehouse_manager.permissions = warehouse_perms
         session.add(warehouse_manager)
     
-    # نقش انبار دار
-    warehouse_staff = session.query(Role).filter_by(name="warehouse_staff").first()
-    if not warehouse_staff:
-        warehouse_staff = Role(
-            name="warehouse_staff",
-            display_name="انبار دار",
-            description="دسترسی محدود به بخش انبار",
-            is_system=True
-        )
-        wh_staff_perms = session.query(Permission).filter(
-            Permission.name.in_([
-                "warehouse_view", "warehouse_edit",
-                "warehouse_receive", "warehouse_dispatch"
-            ])
-        ).all()
-        warehouse_staff.permissions = wh_staff_perms
-        session.add(warehouse_staff)
-    
     session.commit()
     print("✅ نقش‌ها ایجاد شدند")
 
 
 def create_superuser(session, username: str, email: str, password: str, full_name: str):
-    """ایجاد کاربر ادمین اولیه با حل مشکل bcrypt"""
+    """ایجاد کاربر ادمین اولیه"""
     from passlib.context import CryptContext
     
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     
-    # ✅ حل مشکل bcrypt با محدودیت 72 بایت
+    # حل مشکل bcrypt با محدودیت 72 بایت
     password_bytes = password.encode('utf-8')
     
-    # اگر رمز عبور بیش از 72 بایت باشد، ابتدا SHA-256 بزنیم
     if len(password_bytes) > 72:
         print("⚠️ رمز عبور بیش از 72 بایت است - استفاده از SHA-256...")
         password = hashlib.sha256(password_bytes).hexdigest()
@@ -363,7 +344,7 @@ if __name__ == "__main__":
         session,
         username="admin",
         email="admin@company.com",
-        password="admin123",  # ⚠️ حتماً تغییر بدید!
+        password="admin123",
         full_name="مدیر سیستم"
     )
     

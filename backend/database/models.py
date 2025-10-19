@@ -40,12 +40,13 @@ class Order(Base):
     is_warehouse_dispatched = Column(Boolean, default=False)
     dispatch_date = Column(DateTime, nullable=True)
     
-    # 🔥 CRITICAL FIX: استفاده از back_populates به جای backref
+    # Relations
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     sms_logs = relationship("SMSLog", back_populates="order", cascade="all, delete-orphan")
     
-    # 🔥 اینجا مهمه: بدون foreign_keys چون SQLAlchemy خودش تشخیص میده
-    # creator و warehouse رو بعداً تعریف می‌کنیم
+    # 🔥 CRITICAL: بدون foreign_keys چون SQLAlchemy خودش تشخیص میده
+    # creator = relationship - اینو نمیذاریم چون مشکل ایجاد میکنه
+    # warehouse = relationship - اینو هم همینطور
 
 
 class OrderItem(Base):
@@ -105,6 +106,8 @@ class Warehouse(Base):
     location = Column(String(500))
     manager_name = Column(String(200))
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # 🔥 حذف products relationship برای جلوگیری از circular import
 
 
 class Product(Base):
