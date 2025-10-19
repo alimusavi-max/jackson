@@ -4,4 +4,4 @@
 Routers package for Digikala Management API
 """
 
-__all__ = ['orders', 'tracking', 'reports', 'sms']
+__all__ = ['auth', 'orders', 'tracking', 'reports', 'sms', 'labels', 'sender_profiles', 'warehouse']

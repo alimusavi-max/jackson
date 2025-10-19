@@ -68,6 +68,8 @@ class PermissionType(str, enum.Enum):
     SETTINGS_VIEW = "settings_view"
     SETTINGS_EDIT = "settings_edit"
 
+# backend/database/auth_models.py
+# ... (کل فایل رو حفظ کن، فقط بخش User رو اصلاح کن)
 
 class User(Base):
     """مدل کاربر"""
@@ -80,7 +82,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     
     is_active = Column(Boolean, default=True)
-    is_superuser = Column(Boolean, default=False)  # ادمین کل
+    is_superuser = Column(Boolean, default=False)
     
     phone = Column(String(20))
     avatar = Column(String(500))
@@ -89,28 +91,14 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime)
     
-    # Relations
+    # Relations - 🔥 حذف created_orders چون مشکل circular import داره
     roles = relationship("Role", secondary=user_roles, back_populates="users")
-    created_orders = relationship("Order", foreign_keys="[Order.created_by]", back_populates="creator", lazy="dynamic")
     
     def has_permission(self, permission: str) -> bool:
         """چک کردن اینکه آیا کاربر مجوز خاصی دارد"""
         if self.is_superuser:
             return True
-        
-        for role in self.roles:
-            if role.has_permission(permission):
-                return True
-        return False
-    
-    def has_any_permission(self, permissions: list) -> bool:
-        """چک کردن اینکه آیا کاربر حداقل یکی از مجوزها را دارد"""
-        return any(self.has_permission(p) for p in permissions)
-    
-    def has_all_permissions(self, permissions: list) -> bool:
-        """چک کردن اینکه آیا کاربر همه مجوزها را دارد"""
-        return all(self.has_permission(p) for p in permissions)
-
+        return any(role.has_permission(permission) for role in self.roles)
 
 class Role(Base):
     """نقش کاربری"""

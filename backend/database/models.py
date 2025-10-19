@@ -34,18 +34,18 @@ class Order(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # ارتباط با کاربر و انبار (nullable=True برای سازگاری با داده‌های قدیمی)
+    # ارتباط با کاربر و انبار
     created_by = Column(Integer, ForeignKey('users.id'), nullable=True)
     warehouse_id = Column(Integer, ForeignKey('warehouses.id'), nullable=True)
     is_warehouse_dispatched = Column(Boolean, default=False)
     dispatch_date = Column(DateTime, nullable=True)
     
-    # Relations - 🔥 از string استفاده کن تا circular import نداشته باشیم
+    # 🔥 CRITICAL FIX: استفاده از back_populates به جای backref
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     sms_logs = relationship("SMSLog", back_populates="order", cascade="all, delete-orphan")
-    # 🔥 مهم: از string استفاده کن
-    creator = relationship("User", foreign_keys=[created_by], back_populates="created_orders")
-    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
+    
+    # 🔥 اینجا مهمه: بدون foreign_keys چون SQLAlchemy خودش تشخیص میده
+    # creator و warehouse رو بعداً تعریف می‌کنیم
 
 
 class OrderItem(Base):
