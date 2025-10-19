@@ -1,3 +1,4 @@
+// frontend/app/orders/page.tsx - نسخه اصلاح شده
 'use client'
 
 import React, { useEffect, useState } from 'react'
@@ -26,6 +27,8 @@ interface Order {
   postal_code: string
   tracking_code: string | null
   order_date_persian: string
+  created_at: string
+  updated_at: string
   items_count: number
   total_quantity: number
   total_amount: number
@@ -37,6 +40,7 @@ export default function OrdersPage() {
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   
@@ -62,11 +66,58 @@ export default function OrdersPage() {
   const loadOrders = async () => {
     try {
       setLoading(true)
+      setError(null)
+      
+      console.log('🔄 درخواست سفارشات...')
+      
       const res = await ordersAPI.getAll({ limit: 1000 })
-      setOrders(res.data)
-    } catch (error) {
-      console.error('خطا:', error)
-      alert('خطا در دریافت سفارشات')
+      
+      console.log('✅ پاسخ دریافت شد:', res)
+      
+      // بررسی فرمت پاسخ
+      let ordersData: Order[] = []
+      
+      if (Array.isArray(res.data)) {
+        ordersData = res.data
+      } else if (res.data && Array.isArray(res.data.orders)) {
+        ordersData = res.data.orders
+      } else if (Array.isArray(res)) {
+        ordersData = res
+      } else {
+        console.error('❌ فرمت پاسخ نامعتبر:', res)
+        throw new Error('فرمت پاسخ سرور نامعتبر است')
+      }
+      
+      console.log(`✅ ${ordersData.length} سفارش دریافت شد`)
+      
+      // اطمینان از وجود items
+      const processedOrders = ordersData.map(order => ({
+        ...order,
+        items: order.items || [],
+        items_count: order.items_count || (order.items ? order.items.length : 0),
+        total_quantity: order.total_quantity || 0,
+        total_amount: order.total_amount || 0
+      }))
+      
+      setOrders(processedOrders)
+      
+    } catch (error: any) {
+      console.error('❌ خطا در دریافت سفارشات:', error)
+      
+      let errorMessage = 'خطا در دریافت سفارشات'
+      
+      if (error.response) {
+        errorMessage = `خطای سرور: ${error.response.status}`
+        console.error('Response error:', error.response.data)
+      } else if (error.request) {
+        errorMessage = 'خطا در اتصال به سرور'
+        console.error('Request error:', error.request)
+      } else {
+        errorMessage = error.message || 'خطای نامشخص'
+      }
+      
+      setError(errorMessage)
+      alert(`❌ ${errorMessage}`)
     } finally {
       setLoading(false)
     }
@@ -230,6 +281,44 @@ export default function OrdersPage() {
   const provinces = Array.from(new Set(orders.map(o => o.province).filter(Boolean))).sort()
   const statuses = Array.from(new Set(orders.map(o => o.status).filter(Boolean))).sort()
 
+  // نمایش خطا
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100" dir="rtl">
+        <div className="text-center max-w-md bg-white rounded-xl shadow-lg p-8">
+          <div className="text-6xl mb-4">⚠️</div>
+          <h1 className="text-2xl font-bold text-red-600 mb-2">خطا در بارگذاری سفارشات</h1>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={loadOrders}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              تلاش مجدد
+            </button>
+            <button
+              onClick={() => window.location.href = '/'}
+              className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
+            >
+              بازگشت به داشبورد
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 text-lg">در حال بارگذاری سفارشات...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100" dir="rtl">
       {/* Header */}
@@ -267,7 +356,6 @@ export default function OrdersPage() {
               </div>
             </div>
             <div className="flex gap-3">
-              {/* دکمه تایید سفارشات جدید */}
               <button 
                 onClick={handleConfirmNewOrders}
                 disabled={confirming || newOrdersCount === 0}
@@ -286,7 +374,6 @@ export default function OrdersPage() {
                 )}
               </button>
               
-              {/* دکمه همگام‌سازی */}
               <button 
                 onClick={handleSync}
                 disabled={syncing}
@@ -429,14 +516,9 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        {/* Orders Table */}
+        {/* Orders Table - ادامه در قسمت بعد... */}
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          {loading ? (
-            <div className="text-center py-16">
-              <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto"></div>
-              <p className="text-gray-500 mt-4 text-lg">در حال بارگذاری سفارشات...</p>
-            </div>
-          ) : filteredOrders.length === 0 ? (
+          {filteredOrders.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
               <p className="text-6xl mb-4">📦</p>
               <p className="text-xl">هیچ سفارشی با این فیلترها یافت نشد</p>
@@ -473,7 +555,6 @@ export default function OrdersPage() {
                     
                     return (
                       <React.Fragment key={order.id}>
-                        {/* ردیف اصلی */}
                         <tr className={`border-b hover:bg-blue-50 transition cursor-pointer ${hasMultipleItems ? 'bg-yellow-50' : ''} ${isNewOrder ? 'bg-green-50' : ''}`} onClick={() => toggleRow(order.id)}>
                           <td className="px-4 py-3">
                             <button
@@ -542,13 +623,11 @@ export default function OrdersPage() {
                           </td>
                         </tr>
 
-                        {/* ردیف جزئیات */}
                         {isExpanded && (
                           <tr className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2">
                             <td colSpan={10} className="px-4 py-4">
                               {orderItems.length > 0 ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                  {/* اطلاعات تماس */}
                                   <div className="space-y-3">
                                     <h4 className="font-bold text-gray-900 flex items-center gap-2 mb-3">
                                       📞 اطلاعات تماس و آدرس
@@ -575,7 +654,6 @@ export default function OrdersPage() {
                                     </div>
                                   </div>
 
-                                  {/* محصولات */}
                                   <div>
                                     <h4 className="font-bold text-gray-900 flex items-center gap-2 mb-3">
                                       🛒 محصولات سفارش ({orderItems.length} قلم)
@@ -613,7 +691,6 @@ export default function OrdersPage() {
                                       ))}
                                     </div>
 
-                                    {/* مجموع */}
                                     <div className="mt-3 bg-gradient-to-r from-green-100 to-emerald-100 p-4 rounded-lg">
                                       <div className="grid grid-cols-2 gap-4 text-sm mb-2">
                                         <div>
