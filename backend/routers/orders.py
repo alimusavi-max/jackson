@@ -18,7 +18,7 @@ class SyncOrdersRequest(BaseModel):
     fetch_full_details: bool = False
 
 class ConfirmOrdersRequest(BaseModel):
-    shipment_ids: Optional[List[str]] = None  # 🔥 FIX: str به جای int
+    shipment_ids: Optional[List[int]] = None  # 🔥 FIX: str به جای int
 
 class OrderItemResponse(BaseModel):
     id: int
