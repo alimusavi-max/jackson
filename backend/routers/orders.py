@@ -1,4 +1,4 @@
-# backend/routers/orders.py - نسخه کامل اصلاح شده
+# backend/routers/orders.py - نسخه اصلاح شده برای سینک با فرانت
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
@@ -10,8 +10,6 @@ import time
 import subprocess
 import os
 import sys
-# backend/routers/orders.py - تابع confirm_new_orders با مدیریت کامل خطا
-
 from pathlib import Path
 from database.models import Order, OrderItem, Base, init_database, get_session
 from utils.helpers import normalize_id
@@ -102,7 +100,7 @@ def enrich_order_data(order: Order) -> dict:
             "tracking_code": order.tracking_code,
             "order_date_persian": order.order_date_persian or "",
             "created_at": order.created_at.isoformat() if order.created_at else "",
-            "updated_at": order.created_at.isoformat() if order.created_at else "",
+            "updated_at": order.updated_at.isoformat() if order.updated_at else "",
             "items": [
                 {
                     "id": item.id,
@@ -136,84 +134,19 @@ def enrich_order_data(order: Order) -> dict:
             "postal_code": order.postal_code or "نامشخص",
             "tracking_code": order.tracking_code,
             "order_date_persian": order.order_date_persian or "",
-            "created_at": order.created_at,
-            "updated_at": order.updated_at,
+            "created_at": order.created_at.isoformat() if order.created_at else "",
+            "updated_at": order.updated_at.isoformat() if order.updated_at else "",
             "items": [],
             "items_count": 0,
             "total_quantity": 0,
             "total_amount": 0.0
         }
 
-# ========== توابع کمکی برای Auto-Login ==========
-def run_improved_login():
-    """
-    اجرای اسکریپت improved_login.py برای رفرش کردن کوکی‌ها
-    """
-    try:
-        # پیدا کردن مسیر پروژه (یک پوشه بالاتر از backend)
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        project_root = os.path.dirname(backend_dir)
-        login_script = os.path.join(project_root, 'improved_login.py')
-        
-        if not os.path.exists(login_script):
-            print(f"❌ فایل improved_login.py یافت نشد در: {login_script}")
-            return False
-        
-        print(f"\n🔐 در حال اجرای اسکریپت لاگین...")
-        print(f"   مسیر: {login_script}")
-        
-        # اجرای اسکریپت با Python
-        result = subprocess.run(
-            [sys.executable, login_script],
-            cwd=project_root,
-            capture_output=True,
-            text=True,
-            timeout=120  # حداکثر 2 دقیقه
-        )
-        
-        if result.returncode == 0:
-            print("✅ لاگین موفقیت‌آمیز - کوکی‌ها به‌روز شدند")
-            print(f"   خروجی: {result.stdout[:200]}")
-            return True
-        else:
-            print(f"❌ لاگین ناموفق - کد خروج: {result.returncode}")
-            print(f"   خطا: {result.stderr[:500]}")
-            return False
-            
-    except subprocess.TimeoutExpired:
-        print("⏱️ Timeout - اسکریپت لاگین بیش از حد طول کشید")
-        return False
-    except Exception as e:
-        print(f"❌ خطا در اجرای improved_login.py: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
-def reload_cookies():
-    """
-    بارگذاری مجدد کوکی‌ها از فایل
-    """
-    try:
-        from utils.api_core import load_session_cookies, format_cookies_for_requests
-        cookies_list = load_session_cookies()
-        if cookies_list:
-            cookies_dict = format_cookies_for_requests(cookies_list)
-            print(f"✅ کوکی‌های جدید بارگذاری شد ({len(cookies_list)} کوکی)")
-            return cookies_dict
-        else:
-            print("❌ فایل کوکی خالی است")
-            return None
-    except Exception as e:
-        print(f"❌ خطا در بارگذاری مجدد کوکی‌ها: {e}")
-        return None
-
-
 # ========== Endpoints ==========
 
 @router.get("/orders")
 async def get_orders(
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(1000, ge=1, le=100000),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
     has_tracking: Optional[bool] = None,
@@ -555,24 +488,16 @@ async def sync_orders_from_api(
         }
 
 
-
-
 @router.post("/orders/confirm-new")
 async def confirm_new_orders(
-    request: ConfirmOrdersRequest = ConfirmOrdersRequest(),
     db: Session = Depends(get_db)
 ):
-    """
-    تایید سفارشات جدید با ارسال به API دیجی‌کالا
-    - مدیریت 401: اجرای اتوماتیک improved_login.py
-    - مدیریت 429: رعایت Rate Limit با Retry
-    """
+    """تایید سفارشات جدید با ارسال به API دیجی‌کالا"""
     try:
         print("\n" + "="*60)
         print("✅ شروع تایید سفارشات جدید...")
         print("="*60)
         
-        # بارگذاری کوکی‌ها
         from utils.api_core import load_session_cookies, format_cookies_for_requests
         
         cookies_list = load_session_cookies()
@@ -587,17 +512,10 @@ async def confirm_new_orders(
         
         cookies_dict = format_cookies_for_requests(cookies_list)
         
-        # انتخاب سفارشات
-        if request.shipment_ids and len(request.shipment_ids) > 0:
-            print(f"📦 تایید {len(request.shipment_ids)} سفارش مشخص شده...")
-            orders = db.query(Order).filter(
-                Order.shipment_id.in_(request.shipment_ids)
-            ).all()
-        else:
-            print("🔍 جستجوی سفارشات جدید...")
-            orders = db.query(Order).filter(
-                Order.status.in_(['سفارش جدید', 'new', 'New Order', 'جدید'])
-            ).all()
+        print("🔍 جستجوی سفارشات جدید...")
+        orders = db.query(Order).filter(
+            Order.status.in_(['سفارش جدید', 'new', 'New Order', 'جدید'])
+        ).all()
         
         if not orders:
             print("⚠️ هیچ سفارش جدیدی یافت نشد")
@@ -620,7 +538,6 @@ async def confirm_new_orders(
             try:
                 print(f"\n   🔄 پردازش سفارش {order.order_code} (shipment: {order.shipment_id})")
                 
-                # ارسال درخواست به API
                 success, error_msg = await send_confirm_request(
                     order.shipment_id, 
                     cookies_dict
@@ -646,18 +563,15 @@ async def confirm_new_orders(
                 errors.append(f"سفارش {order.order_code}: {str(e)}")
                 failed_count += 1
         
-        # اگر نیاز به لاگین مجدد بود
         if needs_relogin:
             print("\n🔑 اجرای لاگین مجدد...")
-            login_success = await run_improved_login()
+            login_success = run_improved_login()
             
             if login_success:
                 print("✅ لاگین موفق. ادامه تایید سفارشات...")
-                # بارگذاری مجدد کوکی‌ها
                 cookies_list = load_session_cookies()
                 cookies_dict = format_cookies_for_requests(cookies_list)
                 
-                # ادامه تایید سفارشات باقی‌مانده
                 for order in orders[confirmed_count:]:
                     try:
                         print(f"\n   🔄 پردازش سفارش {order.order_code}")
@@ -692,7 +606,6 @@ async def confirm_new_orders(
                     "errors": ["لاگین مجدد ناموفق"]
                 }
         
-        # Commit تغییرات
         try:
             db.commit()
             print(f"\n💾 تغییرات در دیتابیس ذخیره شد")
@@ -738,14 +651,7 @@ async def confirm_new_orders(
 
 
 async def send_confirm_request(shipment_id: str, cookies_dict: dict, max_retries: int = 5):
-    """
-    ارسال درخواست تایید سفارش به API دیجی‌کالا
-    - مدیریت 429 با Retry و Backoff
-    - مدیریت 401 با بازگشت خطا
-    
-    Returns:
-        tuple: (success: bool, error_message: str)
-    """
+    """ارسال درخواست تایید سفارش به API دیجی‌کالا"""
     url = "https://seller.digikala.com/api/v2/ship-by-seller-orders/update-status"
     
     headers = {
@@ -764,7 +670,7 @@ async def send_confirm_request(shipment_id: str, cookies_dict: dict, max_retries
     }
     
     retry_count = 0
-    base_delay = 2  # ثانیه
+    base_delay = 2
     
     while retry_count < max_retries:
         try:
@@ -778,21 +684,17 @@ async def send_confirm_request(shipment_id: str, cookies_dict: dict, max_retries
                 timeout=30
             )
             
-            # ✅ موفقیت
             if response.status_code == 200:
                 print(f"      ✅ پاسخ 200: موفق")
                 return True, ""
             
-            # ⚠️ 401 Unauthorized
             elif response.status_code == 401:
                 print(f"      ⚠️ پاسخ 401: نیاز به لاگین مجدد")
                 return False, "401 Unauthorized - نیاز به لاگین مجدد"
             
-            # ⏳ 429 Rate Limit
             elif response.status_code == 429:
                 retry_count += 1
                 
-                # بررسی Retry-After header
                 retry_after = response.headers.get("Retry-After")
                 
                 if retry_after:
@@ -800,11 +702,9 @@ async def send_confirm_request(shipment_id: str, cookies_dict: dict, max_retries
                         wait_time = int(retry_after)
                         print(f"      ⏳ 429 - سرور درخواست کرد {wait_time} ثانیه صبر کنید...")
                     except ValueError:
-                        # اگر Retry-After یک تاریخ بود (نادر)
                         wait_time = base_delay * (2 ** retry_count)
                         print(f"      ⏳ 429 - Backoff: {wait_time} ثانیه...")
                 else:
-                    # Exponential Backoff
                     wait_time = base_delay * (2 ** retry_count)
                     print(f"      ⏳ 429 - Exponential Backoff: {wait_time} ثانیه...")
                 
@@ -816,7 +716,6 @@ async def send_confirm_request(shipment_id: str, cookies_dict: dict, max_retries
                     print(f"      ❌ تعداد تلاش به حداکثر رسید")
                     return False, f"429 Rate Limit - پس از {max_retries} تلاش ناموفق"
             
-            # ❌ خطاهای دیگر
             else:
                 error_text = response.text[:200]
                 print(f"      ❌ پاسخ {response.status_code}: {error_text}")
@@ -847,19 +746,13 @@ async def send_confirm_request(shipment_id: str, cookies_dict: dict, max_retries
     return False, "ناموفق پس از چندین تلاش"
 
 
-async def run_improved_login():
-    """
-    اجرای اسکریپت improved_login.py برای لاگین مجدد
-    
-    Returns:
-        bool: True اگر لاگین موفق بود
-    """
+def run_improved_login():
+    """اجرای اسکریپت improved_login.py برای لاگین مجدد"""
     try:
         print("\n" + "="*60)
         print("🔑 اجرای improved_login.py...")
         print("="*60)
         
-        # مسیر اسکریپت (همسطح با backend/)
         backend_dir = Path(__file__).resolve().parent.parent
         login_script = backend_dir.parent / "improved_login.py"
         
@@ -868,15 +761,13 @@ async def run_improved_login():
             return False
         
         print(f"📂 مسیر اسکریپت: {login_script}")
-        
-        # اجرای اسکریپت
         print("⏳ در حال اجرا... (ممکن است چند دقیقه طول بکشد)")
         
         result = subprocess.run(
             ["python", str(login_script)],
             capture_output=True,
             text=True,
-            timeout=300,  # 5 دقیقه timeout
+            timeout=300,
             encoding='utf-8',
             errors='replace'
         )
@@ -888,11 +779,9 @@ async def run_improved_login():
             print("\n⚠️ خطاها:")
             print(result.stderr)
         
-        # بررسی موفقیت
         if result.returncode == 0:
             print("\n✅ لاگین با موفقیت انجام شد!")
             
-            # بررسی وجود فایل کوکی
             cookies_file = backend_dir / "sessions" / "digikala_cookies.json"
             if cookies_file.exists():
                 print(f"✅ فایل کوکی یافت شد: {cookies_file}")
