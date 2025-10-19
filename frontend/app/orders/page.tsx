@@ -2,8 +2,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { ordersAPI } from '@/lib/api'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, RefreshCw, Package, AlertCircle } from 'lucide-react'
 
 interface OrderItem {
   id: number
@@ -33,6 +32,13 @@ interface Order {
   total_quantity: number
   total_amount: number
   items: OrderItem[]
+}
+
+interface OrdersResponse {
+  data: Order[]
+  total: number
+  page: number
+  limit: number
 }
 
 export default function OrdersPage() {
@@ -70,22 +76,21 @@ export default function OrdersPage() {
       
       console.log('🔄 درخواست سفارشات...')
       
-      const res = await ordersAPI.getAll({ limit: 1000 })
+      const response = await fetch('http://localhost:8000/api/orders?limit=1000')
       
-      console.log('✅ پاسخ دریافت شد:', res)
+      if (!response.ok) {
+        throw new Error(`خطای سرور: ${response.status}`)
+      }
       
-      // بررسی فرمت پاسخ
-      let ordersData: Order[] = []
+      const result: OrdersResponse = await response.json()
       
-      if (Array.isArray(res.data)) {
-        ordersData = res.data
-      } else if (res.data && Array.isArray(res.data.orders)) {
-        ordersData = res.data.orders
-      } else if (Array.isArray(res)) {
-        ordersData = res
-      } else {
-        console.error('❌ فرمت پاسخ نامعتبر:', res)
-        throw new Error('فرمت پاسخ سرور نامعتبر است')
+      console.log('✅ پاسخ دریافت شد:', result)
+      
+      // استخراج آرایه سفارشات
+      const ordersData = result.data || []
+      
+      if (!Array.isArray(ordersData)) {
+        throw new Error('فرمت پاسخ نامعتبر است')
       }
       
       console.log(`✅ ${ordersData.length} سفارش دریافت شد`)
@@ -102,22 +107,9 @@ export default function OrdersPage() {
       setOrders(processedOrders)
       
     } catch (error: any) {
-      console.error('❌ خطا در دریافت سفارشات:', error)
-      
-      let errorMessage = 'خطا در دریافت سفارشات'
-      
-      if (error.response) {
-        errorMessage = `خطای سرور: ${error.response.status}`
-        console.error('Response error:', error.response.data)
-      } else if (error.request) {
-        errorMessage = 'خطا در اتصال به سرور'
-        console.error('Request error:', error.request)
-      } else {
-        errorMessage = error.message || 'خطای نامشخص'
-      }
-      
-      setError(errorMessage)
-      alert(`❌ ${errorMessage}`)
+      console.error('❌ خطا:', error)
+      setError(error.message || 'خطا در دریافت سفارشات')
+      alert(`❌ ${error.message}`)
     } finally {
       setLoading(false)
     }
@@ -130,20 +122,26 @@ export default function OrdersPage() {
     
     try {
       setSyncing(true)
-      const response = await ordersAPI.sync(false)
+      const response = await fetch('http://localhost:8000/api/orders/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fetch_full_details: false })
+      })
       
-      if (response.data.success) {
+      const data = await response.json()
+      
+      if (data.success) {
         alert(`✅ همگام‌سازی موفق!\n\n` +
-          `📦 سفارشات جدید: ${response.data.new_orders}\n` +
-          `🔄 به‌روزرسانی شده: ${response.data.updated_orders}\n` +
-          `📊 مجموع: ${response.data.total}`)
+          `📦 سفارشات جدید: ${data.new_orders}\n` +
+          `🔄 به‌روزرسانی شده: ${data.updated_orders}\n` +
+          `📊 مجموع: ${data.total}`)
         await loadOrders()
       } else {
-        alert(`❌ خطا:\n\n${response.data.message}`)
+        alert(`❌ خطا:\n\n${data.message}`)
       }
     } catch (error: any) {
       console.error('خطا:', error)
-      alert(`❌ خطا:\n\n${error.response?.data?.message || error.message}`)
+      alert(`❌ خطا:\n\n${error.message}`)
     } finally {
       setSyncing(false)
     }
@@ -161,7 +159,7 @@ export default function OrdersPage() {
       return
     }
     
-    if (!confirm(`⚠️ آیا مطمئن هستید؟\n\n${newOrders.length} سفارش جدید تایید خواهد شد.\nاین عملیات وضعیت سفارشات را در دیجی‌کالا تغییر می‌دهد.`)) {
+    if (!confirm(`⚠️ آیا مطمئن هستید؟\n\n${newOrders.length} سفارش جدید تایید خواهد شد.`)) {
       return
     }
     
@@ -187,7 +185,7 @@ export default function OrdersPage() {
       }
     } catch (error: any) {
       console.error('خطا:', error)
-      alert(`❌ خطا در تایید سفارشات:\n\n${error.message}`)
+      alert(`❌ خطا:\n\n${error.message}`)
     } finally {
       setConfirming(false)
     }
@@ -377,9 +375,10 @@ export default function OrdersPage() {
               <button 
                 onClick={handleSync}
                 disabled={syncing}
-                className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
               >
-                {syncing ? '⏳ در حال همگام‌سازی...' : '🔄 همگام‌سازی'}
+                <RefreshCw size={18} className={syncing ? 'animate-spin' : ''} />
+                {syncing ? 'در حال همگام‌سازی...' : 'همگام‌سازی'}
               </button>
               
               <button 
@@ -516,11 +515,11 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        {/* Orders Table - ادامه در قسمت بعد... */}
+        {/* Orders Table */}
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
           {filteredOrders.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
-              <p className="text-6xl mb-4">📦</p>
+              <Package size={64} className="mx-auto mb-4 text-gray-300" />
               <p className="text-xl">هیچ سفارشی با این فیلترها یافت نشد</p>
               <button 
                 onClick={resetFilters}
@@ -555,7 +554,10 @@ export default function OrdersPage() {
                     
                     return (
                       <React.Fragment key={order.id}>
-                        <tr className={`border-b hover:bg-blue-50 transition cursor-pointer ${hasMultipleItems ? 'bg-yellow-50' : ''} ${isNewOrder ? 'bg-green-50' : ''}`} onClick={() => toggleRow(order.id)}>
+                        <tr 
+                          className={`border-b hover:bg-blue-50 transition cursor-pointer ${hasMultipleItems ? 'bg-yellow-50' : ''} ${isNewOrder ? 'bg-green-50' : ''}`} 
+                          onClick={() => toggleRow(order.id)}
+                        >
                           <td className="px-4 py-3">
                             <button
                               onClick={(e) => {
