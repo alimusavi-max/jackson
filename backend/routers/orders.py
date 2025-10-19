@@ -1,6 +1,7 @@
 # backend/routers/orders.py - نسخه اصلاح شده
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from datetime import datetime
 import pandas as pd
 from typing import Optional, List
@@ -53,6 +54,13 @@ class OrderResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# 🔥 مدل پاسخ لیست سفارشات
+class OrdersListResponse(BaseModel):
+    data: List[dict]
+    total: int
+    page: int
+    limit: int
+
 # ========== Dependency ==========
 def get_db():
     """دریافت session دیتابیس"""
@@ -69,7 +77,6 @@ def get_db():
 def enrich_order_data(order: Order) -> dict:
     """اضافه کردن فیلدهای محاسباتی به سفارش"""
     try:
-        # مطمئن شویم که items بارگذاری شده
         items = order.items if order.items is not None else []
         
         items_count = len(items)
@@ -111,7 +118,6 @@ def enrich_order_data(order: Order) -> dict:
         import traceback
         traceback.print_exc()
         
-        # حداقل اطلاعات پایه را برگردان
         return {
             "id": order.id,
             "order_code": order.order_code or "",
@@ -135,7 +141,7 @@ def enrich_order_data(order: Order) -> dict:
 
 # ========== Endpoints ==========
 
-@router.get("/orders")
+@router.get("/orders", response_model=None)
 async def get_orders(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -151,7 +157,6 @@ async def get_orders(
         print(f"\n{'='*60}")
         print(f"📥 درخواست سفارشات: limit={limit}, offset={offset}")
         
-        # 🔥 CRITICAL: استفاده از joinedload برای بارگذاری items
         query = db.query(Order).options(joinedload(Order.items))
         
         # فیلتر وضعیت
@@ -195,7 +200,7 @@ async def get_orders(
         
         print(f"   ✅ {len(orders)} سفارش دریافت شد")
         
-        # 🔥 تبدیل به format مورد نیاز فرانت
+        # تبدیل به format مورد نیاز فرانت
         enriched_orders = []
         for order in orders:
             try:
@@ -208,7 +213,13 @@ async def get_orders(
         print(f"   ✅ {len(enriched_orders)} سفارش پردازش شد")
         print(f"{'='*60}\n")
         
-        return enriched_orders
+        # 🔥 FIX: برگرداندن در فرمت استاندارد
+        return {
+            "data": enriched_orders,
+            "total": total_count,
+            "page": offset // limit + 1 if limit > 0 else 1,
+            "limit": limit
+        }
     
     except Exception as e:
         print(f"❌ خطا در دریافت سفارشات: {e}")
@@ -229,7 +240,6 @@ async def get_order(
     try:
         print(f"\n📥 درخواست سفارش {order_id}")
         
-        # 🔥 با joinedload
         order = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
         
         if not order:
@@ -249,12 +259,11 @@ async def get_order(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 🔥 FIX: اضافه کردن endpoint آمار
 @router.get("/orders/stats/summary")
 async def get_orders_summary(db: Session = Depends(get_db)):
     """آمار خلاصه سفارشات"""
     try:
-        from sqlalchemy import func
-        
         print("\n📊 محاسبه آمار سفارشات...")
         
         total = db.query(Order).count()
@@ -511,7 +520,6 @@ async def confirm_new_orders(
         failed_count = 0
         
         for order in orders:
-            # منطق تایید...
             confirmed_count += 1
         
         db.commit()
