@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+# backend/routers/orders.py
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 import pandas as pd
 from typing import Optional, List
@@ -17,7 +18,43 @@ class SyncOrdersRequest(BaseModel):
     fetch_full_details: bool = False
 
 class ConfirmOrdersRequest(BaseModel):
-    shipment_ids: Optional[List[int]] = None  # اگر خالی باشه، همه سفارشات جدید رو تایید می‌کنه
+    shipment_ids: Optional[List[int]] = None
+
+class OrderItemResponse(BaseModel):
+    id: int
+    product_title: str
+    product_code: Optional[str]
+    product_image: Optional[str]
+    quantity: int
+    price: float
+
+    class Config:
+        from_attributes = True
+
+class OrderResponse(BaseModel):
+    id: int
+    order_code: str
+    shipment_id: str
+    customer_name: Optional[str]
+    customer_phone: Optional[str]
+    status: Optional[str]
+    province: Optional[str]
+    city: Optional[str]
+    full_address: Optional[str]
+    postal_code: Optional[str]
+    tracking_code: Optional[str]
+    order_date_persian: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    items: List[OrderItemResponse]
+    
+    # 🔥 فیلدهای محاسباتی که فرانت نیاز داره
+    items_count: int
+    total_quantity: int
+    total_amount: float
+
+    class Config:
+        from_attributes = True
 
 # ========== Dependency ==========
 def get_db():
@@ -67,7 +104,172 @@ def send_confirm_request(shipment_id: int, cookies_dict: dict) -> tuple[bool, st
     except Exception as e:
         return False, str(e)
 
+# ========== تابع کمکی برای محاسبه فیلدها ==========
+def enrich_order_data(order: Order) -> dict:
+    """اضافه کردن فیلدهای محاسباتی به سفارش"""
+    items_count = len(order.items) if order.items else 0
+    total_quantity = sum(item.quantity for item in order.items) if order.items else 0
+    total_amount = sum(item.price * item.quantity for item in order.items) if order.items else 0
+    
+    return {
+        "id": order.id,
+        "order_code": order.order_code,
+        "shipment_id": order.shipment_id,
+        "customer_name": order.customer_name,
+        "customer_phone": order.customer_phone,
+        "status": order.status,
+        "province": order.province,
+        "city": order.city,
+        "full_address": order.full_address,
+        "postal_code": order.postal_code,
+        "tracking_code": order.tracking_code,
+        "order_date_persian": order.order_date_persian,
+        "created_at": order.created_at,
+        "updated_at": order.updated_at,
+        "items": [
+            {
+                "id": item.id,
+                "product_title": item.product_title,
+                "product_code": item.product_code,
+                "product_image": item.product_image,
+                "quantity": item.quantity,
+                "price": item.price
+            }
+            for item in (order.items or [])
+        ],
+        "items_count": items_count,
+        "total_quantity": total_quantity,
+        "total_amount": total_amount
+    }
+
 # ========== Endpoints ==========
+
+@router.get("/orders")
+async def get_orders(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    status: Optional[str] = None,
+    has_tracking: Optional[bool] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    دریافت لیست سفارشات با فیلترهای مختلف
+    
+    - **limit**: تعداد سفارشات (پیش‌فرض: 100)
+    - **offset**: شروع از کدام سفارش (برای صفحه‌بندی)
+    - **status**: فیلتر بر اساس وضعیت
+    - **has_tracking**: فیلتر سفارشات با/بدون کد رهگیری
+    - **search**: جستجو در کد سفارش، نام مشتری یا شماره تلفن
+    """
+    try:
+        # 🔥 CRITICAL: استفاده از joinedload برای بارگذاری items
+        query = db.query(Order).options(joinedload(Order.items))
+        
+        # فیلتر وضعیت
+        if status:
+            query = query.filter(Order.status == status)
+        
+        # فیلتر کد رهگیری
+        if has_tracking is not None:
+            if has_tracking:
+                query = query.filter(
+                    Order.tracking_code.isnot(None),
+                    Order.tracking_code != '',
+                    Order.tracking_code != 'نامشخص'
+                )
+            else:
+                query = query.filter(
+                    (Order.tracking_code.is_(None)) |
+                    (Order.tracking_code == '') |
+                    (Order.tracking_code == 'نامشخص')
+                )
+        
+        # جستجو
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(
+                (Order.order_code.like(search_term)) |
+                (Order.customer_name.like(search_term)) |
+                (Order.customer_phone.like(search_term)) |
+                (Order.shipment_id.like(search_term))
+            )
+        
+        # مرتب‌سازی و صفحه‌بندی
+        orders = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
+        
+        print(f"✅ {len(orders)} سفارش دریافت شد (offset: {offset}, limit: {limit})")
+        
+        # 🔥 تبدیل به format مورد نیاز فرانت
+        enriched_orders = [enrich_order_data(order) for order in orders]
+        
+        return enriched_orders
+    
+    except Exception as e:
+        print(f"❌ خطا در دریافت سفارشات: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/orders/{order_id}")
+async def get_order(
+    order_id: int,
+    db: Session = Depends(get_db)
+):
+    """دریافت جزئیات یک سفارش خاص"""
+    try:
+        # 🔥 با joinedload
+        order = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
+        
+        if not order:
+            raise HTTPException(status_code=404, detail="سفارش یافت نشد")
+        
+        return enrich_order_data(order)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ خطا: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/orders/stats/summary")
+async def get_orders_summary(db: Session = Depends(get_db)):
+    """آمار خلاصه سفارشات"""
+    try:
+        from sqlalchemy import func
+        
+        total = db.query(Order).count()
+        
+        with_tracking = db.query(Order).filter(
+            Order.tracking_code.isnot(None),
+            Order.tracking_code != '',
+            Order.tracking_code != 'نامشخص'
+        ).count()
+        
+        without_tracking = total - with_tracking
+        
+        # گروه‌بندی بر اساس وضعیت
+        status_counts = db.query(
+            Order.status,
+            func.count(Order.id)
+        ).group_by(Order.status).all()
+        
+        status_breakdown = {status: count for status, count in status_counts if status}
+        
+        return {
+            "total_orders": total,
+            "with_tracking": with_tracking,
+            "without_tracking": without_tracking,
+            "status_breakdown": status_breakdown
+        }
+    
+    except Exception as e:
+        print(f"❌ خطا در دریافت آمار: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/orders/sync")
 async def sync_orders_from_api(
     request: SyncOrdersRequest,

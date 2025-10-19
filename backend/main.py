@@ -7,7 +7,9 @@ from sqlalchemy.orm import sessionmaker
 from typing import List, Optional
 import os
 import sys
-
+# در قسمت imports بعد از sys.path.insert
+from database.models import Order, OrderItem
+from database.auth_models import User  # این رو اضافه کن
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database.models import Order, OrderItem, SenderProfile, SMSLog, Base
