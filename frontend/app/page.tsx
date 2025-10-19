@@ -1,268 +1,143 @@
+// frontend/app/page.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ordersAPI } from '@/lib/api'
-
-interface Stats {
-  total_orders: number
-  orders_with_tracking: number
-  orders_without_tracking: number
-  total_sales: number
-}
-
-interface Order {
-  id: number
-  order_code: string
-  customer_name: string
-  status: string
-  tracking_code: string | null
-}
+import { useAuth } from '@/contexts/AuthContext'
+import ProtectedRoute from '@/components/ProtectedRoute'
+import Sidebar from '@/components/Sidebar'
+import { Package, TrendingUp, AlertCircle, CheckCircle } from 'lucide-react'
 
 export default function Dashboard() {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [recentOrders, setRecentOrders] = useState<Order[]>([])
+  const { user } = useAuth()
+  const [stats, setStats] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
 
   useEffect(() => {
-    loadData()
+    loadStats()
   }, [])
 
-  const loadData = async () => {
+  const loadStats = async () => {
     try {
-      setLoading(true)
-      
-      const statsRes = await ordersAPI.getStats()
-      setStats(statsRes.data)
-      
-      const ordersRes = await ordersAPI.getAll({ limit: 5 })
-      setRecentOrders(ordersRes.data)
+      const response = await fetch('http://localhost:8000/api/stats')
+      const data = await response.json()
+      setStats(data)
     } catch (error) {
-      console.error('خطا در دریافت داده‌ها:', error)
+      console.error('خطا:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSync = async () => {
-    if (!confirm('⚠️ آیا مطمئن هستید؟\n\nاین عملیات ممکن است چند دقیقه طول بکشد و سفارشات جدید را از دیجی‌کالا دریافت می‌کند.')) {
-      return
-    }
-    
-    try {
-      setSyncing(true)
-      const response = await ordersAPI.sync(false)
-      
-      if (response.data.success) {
-        alert(`✅ همگام‌سازی موفق!\n\n` +
-          `📦 سفارشات جدید: ${response.data.new_orders}\n` +
-          `🔄 به‌روزرسانی شده: ${response.data.updated_orders}\n` +
-          `📊 مجموع: ${response.data.total}\n\n` +
-          `در حال بارگذاری مجدد...`)
-        await loadData()
-      } else {
-        alert(`❌ خطا در همگام‌سازی:\n\n${response.data.message}`)
-      }
-    } catch (error: any) {
-      console.error('خطا:', error)
-      alert(`❌ خطا در ارتباط با سرور:\n\n${error.response?.data?.message || error.message}`)
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 text-lg">در حال بارگذاری...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50" dir="rtl">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">🛍️ سیستم مدیریت دیجی‌کالا</h1>
-              <p className="text-gray-600 mt-1">
-                داشبورد مدیریت سفارشات - آخرین به‌روزرسانی: {new Date().toLocaleTimeString('fa-IR')}
+    <ProtectedRoute>
+      <div className="flex h-screen bg-gray-50" dir="rtl">
+        <Sidebar />
+        
+        <main className="flex-1 overflow-y-auto">
+          {/* Header */}
+          <header className="bg-white shadow-sm border-b">
+            <div className="px-8 py-6">
+              <h1 className="text-3xl font-bold text-gray-900">
+                خوش آمدید، {user?.full_name}! 👋
+              </h1>
+              <p className="text-gray-600 mt-2">
+                نمای کلی عملکرد سیستم
               </p>
             </div>
-            <div className="flex gap-3">
-              <button 
-                onClick={handleSync}
-                disabled={syncing}
-                className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                <span className={syncing ? 'animate-spin' : ''}>🔄</span>
-                {syncing ? 'در حال همگام‌سازی...' : 'همگام‌سازی با API'}
-              </button>
-              <a 
-                href="/orders"
-                className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-              >
-                📋 سفارشات
-              </a>
-            </div>
-          </div>
-        </div>
-      </header>
+          </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {/* کل سفارشات */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 border-r-4 border-blue-500 hover:shadow-xl transition transform hover:-translate-y-1">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm font-medium">کل سفارشات</p>
-                <h3 className="text-4xl font-bold text-gray-900 mt-2">
-                  {stats?.total_orders.toLocaleString('fa-IR') || '0'}
-                </h3>
-                <p className="text-blue-600 text-sm mt-2">📦 تمام سفارشات</p>
+          <div className="p-8">
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-600 mx-auto"></div>
               </div>
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-3xl">
-                📦
-              </div>
-            </div>
-          </div>
+            ) : (
+              <>
+                {/* Stats Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                  <StatCard
+                    title="کل سفارشات"
+                    value={stats?.total_orders || 0}
+                    icon={Package}
+                    color="blue"
+                  />
+                  <StatCard
+                    title="دارای کد رهگیری"
+                    value={stats?.orders_with_tracking || 0}
+                    icon={CheckCircle}
+                    color="green"
+                  />
+                  <StatCard
+                    title="بدون کد رهگیری"
+                    value={stats?.orders_without_tracking || 0}
+                    icon={AlertCircle}
+                    color="orange"
+                  />
+                  <StatCard
+                    title="مجموع فروش"
+                    value={`${((stats?.total_sales || 0) / 1000000).toFixed(1)}M`}
+                    icon={TrendingUp}
+                    color="purple"
+                  />
+                </div>
 
-          {/* دارای کد رهگیری */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 border-r-4 border-green-500 hover:shadow-xl transition transform hover:-translate-y-1">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm font-medium">دارای کد رهگیری</p>
-                <h3 className="text-4xl font-bold text-gray-900 mt-2">
-                  {stats?.orders_with_tracking.toLocaleString('fa-IR') || '0'}
-                </h3>
-                <p className="text-gray-600 text-sm mt-2">
-                  {stats ? Math.round((stats.orders_with_tracking / stats.total_orders) * 100) : 0}% از کل
-                </p>
-              </div>
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-3xl">
-                ✅
-              </div>
-            </div>
-          </div>
-
-          {/* بدون کد رهگیری */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 border-r-4 border-orange-500 hover:shadow-xl transition transform hover:-translate-y-1">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm font-medium">نیاز به رهگیری</p>
-                <h3 className="text-4xl font-bold text-gray-900 mt-2">
-                  {stats?.orders_without_tracking.toLocaleString('fa-IR') || '0'}
-                </h3>
-                <p className="text-orange-600 text-sm mt-2">⚠ نیاز به اقدام</p>
-              </div>
-              <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center text-3xl">
-                ⏳
-              </div>
-            </div>
-          </div>
-
-          {/* مجموع فروش */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 border-r-4 border-purple-500 hover:shadow-xl transition transform hover:-translate-y-1">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm font-medium">مجموع فروش</p>
-                <h3 className="text-3xl font-bold text-gray-900 mt-2">
-                  {stats ? (stats.total_sales / 1000000).toFixed(1) : '0'} M
-                </h3>
-                <p className="text-purple-600 text-sm mt-2">
-                  {stats?.total_sales.toLocaleString('fa-IR')} تومان
-                </p>
-              </div>
-              <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-3xl">
-                💰
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">⚡ دسترسی سریع</h2>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <a href="/orders" className="p-4 border-2 border-blue-200 rounded-xl hover:bg-blue-50 hover:border-blue-400 transition text-center block">
-              <div className="text-3xl mb-2">📋</div>
-              <div className="font-medium text-gray-700">سفارشات</div>
-            </a>
-            <a href="/labels" className="p-4 border-2 border-green-200 rounded-xl hover:bg-green-50 hover:border-green-400 transition text-center block">
-              <div className="text-3xl mb-2">🏷️</div>
-              <div className="font-medium text-gray-700">برچسب پستی</div>
-            </a>
-            <a href="/tracking" className="p-4 border-2 border-yellow-200 rounded-xl hover:bg-yellow-50 hover:border-yellow-400 transition text-center block">
-              <div className="text-3xl mb-2">📮</div>
-              <div className="font-medium text-gray-700">کد رهگیری</div>
-            </a>
-            <a href="/sms" className="p-4 border-2 border-purple-200 rounded-xl hover:bg-purple-50 hover:border-purple-400 transition text-center block">
-              <div className="text-3xl mb-2">📱</div>
-              <div className="font-medium text-gray-700">ارسال پیامک</div>
-            </a>
-            <a href="/reports" className="p-4 border-2 border-orange-200 rounded-xl hover:bg-orange-50 hover:border-orange-400 transition text-center block">
-              <div className="text-3xl mb-2">📊</div>
-              <div className="font-medium text-gray-700">گزارشات</div>
-            </a>
-          </div>
-        </div>
-
-        {/* Recent Orders */}
-        <div className="bg-white rounded-2xl shadow-lg p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-gray-900">📦 آخرین سفارشات</h2>
-            <a href="/orders" className="text-blue-600 hover:text-blue-700 text-sm font-medium">
-              مشاهده همه ←
-            </a>
-          </div>
-          
-          {recentOrders.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">
-              <p>هیچ سفارشی یافت نشد</p>
-              <button 
-                onClick={handleSync}
-                className="mt-4 text-blue-600 hover:text-blue-700 font-medium"
-              >
-                همگام‌سازی با دیجی‌کالا →
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {recentOrders.map((order, i) => (
-                <div key={order.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
-                      #{i + 1}
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900">سفارش {order.order_code}</p>
-                      <p className="text-sm text-gray-500">مشتری: {order.customer_name || 'نامشخص'}</p>
-                    </div>
-                  </div>
-                  <div className="text-left">
-                    {order.tracking_code ? (
-                      <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
-                        ✓ {order.status || 'ارسال شده'}
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium">
-                        ⏳ {order.status || 'در انتظار'}
-                      </span>
+                {/* Quick Actions */}
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                  <h2 className="text-xl font-bold text-gray-900 mb-4">⚡ دسترسی سریع</h2>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    {user?.permissions.includes('sales_view') && (
+                      <QuickAction href="/orders" icon="📋" label="سفارشات" />
+                    )}
+                    {user?.permissions.includes('labels_view') && (
+                      <QuickAction href="/labels" icon="🏷️" label="برچسب پستی" />
+                    )}
+                    {user?.permissions.includes('tracking_view') && (
+                      <QuickAction href="/tracking" icon="📮" label="کد رهگیری" />
+                    )}
+                    {user?.permissions.includes('warehouse_view') && (
+                      <QuickAction href="/warehouse/inventory" icon="🏭" label="موجودی انبار" />
+                    )}
+                    {user?.permissions.includes('users_view') && (
+                      <QuickAction href="/admin/users" icon="👥" label="کاربران" />
                     )}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
+              </>
+            )}
+          </div>
+        </main>
+      </div>
+    </ProtectedRoute>
+  )
+}
+
+function StatCard({ title, value, icon: Icon, color }: any) {
+  const colors = {
+    blue: 'from-blue-500 to-blue-600',
+    green: 'from-green-500 to-green-600',
+    orange: 'from-orange-500 to-orange-600',
+    purple: 'from-purple-500 to-purple-600',
+  }
+
+  return (
+    <div className={`bg-gradient-to-br ${colors[color as keyof typeof colors]} rounded-2xl shadow-lg p-6 text-white`}>
+      <div className="flex items-center justify-between mb-4">
+        <Icon size={32} className="opacity-80" />
+      </div>
+      <h3 className="text-3xl font-bold mb-1">{typeof value === 'number' ? value.toLocaleString('fa-IR') : value}</h3>
+      <p className="text-sm opacity-90">{title}</p>
     </div>
+  )
+}
+
+function QuickAction({ href, icon, label }: any) {
+  return (
+    <a
+      href={href}
+      className="p-4 border-2 border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition text-center block"
+    >
+      <div className="text-3xl mb-2">{icon}</div>
+      <div className="font-medium text-gray-700 text-sm">{label}</div>
+    </a>
   )
 }

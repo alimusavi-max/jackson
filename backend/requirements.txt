@@ -1,20 +1,38 @@
+# Backend Requirements - Updated for Auth + Warehouse
+
+# FastAPI & Web Framework
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Database
 sqlalchemy==2.0.25
 pydantic==2.5.3
-pandas==2.2.0
-python-multipart==0.0.6
-openpyxl==3.1.2
-pdfplumber==0.10.3
-requests==2.31.0
+
+# Auth & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
 python-dotenv==1.0.0
-selenium==4.16.0
-beautifulsoup4==4.12.3
-jdatetime==5.0.0
+
+# Data Processing
+pandas==2.2.0
+openpyxl==3.1.2
+
+# PDF & Documents
+pdfplumber==0.10.3
+reportlab==4.0.9
+pillow==10.2.0
+
+# Persian/Arabic Text Support
 arabic-reshaper==3.0.0
 python-bidi==0.4.2
+jdatetime==5.0.0
+
+# QR & Barcode
 qrcode==7.4.2
-pillow==10.2.0
-reportlab==4.0.9
 treepoem==3.23.0
-reportlab==4.0.9
+
+# Web Scraping (برای sync با API)
+requests==2.31.0
+selenium==4.16.0
+beautifulsoup4==4.12.3

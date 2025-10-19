@@ -1,3 +1,4 @@
+# backend/main.py
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -65,17 +66,27 @@ def get_db():
 # ==================== Include Routers ====================
 print("\n🔧 در حال بارگذاری Routers...")
 
-# 🔥 اضافه کردن sender_profiles router
+# 🔐 Auth Router (باید اول باشد)
 try:
-    from routers import sender_profiles
-    app.include_router(sender_profiles.router, prefix="/api", tags=["sender-profiles"])
-    print("✅ sender_profiles router loaded at /api/sender-profiles")
+    from routers import auth
+    app.include_router(auth.router, prefix="/api")
+    print("✅ auth router loaded at /api/auth")
 except Exception as e:
-    print(f"❌ خطا در بارگذاری sender_profiles router: {e}")
+    print(f"❌ خطا در بارگذاری auth router: {e}")
     import traceback
     traceback.print_exc()
-    
-    
+
+# 📦 Warehouse Router
+try:
+    from routers import warehouse
+    app.include_router(warehouse.router, prefix="/api")
+    print("✅ warehouse router loaded at /api/warehouse")
+except Exception as e:
+    print(f"❌ خطا در بارگذاری warehouse router: {e}")
+    import traceback
+    traceback.print_exc()
+
+# 🛍️ Orders Router
 try:
     from routers import orders
     app.include_router(orders.router, prefix="/api", tags=["orders"])
@@ -85,6 +96,7 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
+# 📋 Labels Router
 try:
     from routers import labels
     app.include_router(labels.router, prefix="/api", tags=["labels"])
@@ -94,13 +106,23 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
-# 🔥 اضافه کردن tracking router
+# 📮 Tracking Router
 try:
     from routers import tracking
     app.include_router(tracking.router, prefix="/api", tags=["tracking"])
     print("✅ tracking router loaded at /api/tracking")
 except Exception as e:
     print(f"❌ خطا در بارگذاری tracking router: {e}")
+    import traceback
+    traceback.print_exc()
+
+# 📤 Sender Profiles Router
+try:
+    from routers import sender_profiles
+    app.include_router(sender_profiles.router, prefix="/api", tags=["sender-profiles"])
+    print("✅ sender_profiles router loaded at /api/sender-profiles")
+except Exception as e:
+    print(f"❌ خطا در بارگذاری sender_profiles router: {e}")
     import traceback
     traceback.print_exc()
 
@@ -118,13 +140,23 @@ def root():
         db.close()
     
     return {
-        "message": "Digikala Management API v2.0",
+        "message": "Digikala Management API v2.0 🚀",
         "status": "running",
         "db_path": DB_PATH_ABS,
         "db_exists": os.path.exists(DB_PATH_ABS),
         "orders_count": count,
+        "features": {
+            "auth": "✓ کاربران و نقش‌ها",
+            "sales": "✓ مدیریت فروش",
+            "warehouse": "✓ انبارداری",
+            "labels": "✓ برچسب پستی",
+            "tracking": "✓ کد رهگیری",
+            "sms": "✓ پیامک"
+        },
         "endpoints": {
+            "auth": "/api/auth/login",
             "orders": "/api/orders",
+            "warehouse": "/api/warehouse/products",
             "labels": "/api/labels",
             "tracking": "/api/tracking",
             "docs": "/docs"
@@ -168,134 +200,6 @@ def get_stats(db: Session = Depends(get_db)):
             "total_sales": 0
         }
 
-@app.get("/api/orders")
-def get_orders(
-    limit: int = 1000,
-    skip: int = 0,
-    has_tracking: Optional[bool] = None,
-    search: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    """🔥 دریافت لیست سفارشات"""
-    try:
-        query = db.query(Order)
-        
-        if has_tracking is not None:
-            if has_tracking:
-                query = query.filter(
-                    Order.tracking_code.isnot(None),
-                    Order.tracking_code != '',
-                    Order.tracking_code != 'نامشخص'
-                )
-            else:
-                query = query.filter(
-                    (Order.tracking_code.is_(None)) | 
-                    (Order.tracking_code == '') | 
-                    (Order.tracking_code == 'نامشخص')
-                )
-        
-        if search:
-            search_filter = f"%{search}%"
-            query = query.filter(
-                (Order.order_code.like(search_filter)) |
-                (Order.customer_name.like(search_filter)) |
-                (Order.tracking_code.like(search_filter))
-            )
-        
-        orders = query.order_by(Order.id.desc()).offset(skip).limit(limit).all()
-        
-        result = []
-        for order in orders:
-            items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
-            
-            total_quantity = sum(item.quantity for item in items)
-            total_amount = sum(item.price * item.quantity for item in items)
-            
-            items_list = [
-                {
-                    "id": item.id,
-                    "product_title": item.product_title,
-                    "product_code": item.product_code,
-                    "quantity": item.quantity,
-                    "price": item.price,
-                    "product_image": item.product_image
-                }
-                for item in items
-            ]
-            
-            result.append({
-                "id": order.id,
-                "order_code": order.order_code,
-                "shipment_id": order.shipment_id,
-                "customer_name": order.customer_name or "نامشخص",
-                "customer_phone": order.customer_phone or "",
-                "status": order.status or "نامشخص",
-                "city": order.city or "",
-                "province": order.province or "",
-                "full_address": order.full_address or "",
-                "postal_code": order.postal_code or "",
-                "tracking_code": order.tracking_code,
-                "order_date_persian": order.order_date_persian or "",
-                "items_count": len(items),
-                "total_quantity": total_quantity,
-                "total_amount": total_amount,
-                "items": items_list
-            })
-        
-        return result
-    
-    except Exception as e:
-        print(f"خطا در get_orders: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
-    
-@app.get("/api/orders/{order_id}")
-def get_order_detail(order_id: int, db: Session = Depends(get_db)):
-    """جزئیات یک سفارش"""
-    from fastapi import HTTPException
-    
-    order = db.query(Order).filter(Order.id == order_id).first()
-    
-    if not order:
-        raise HTTPException(status_code=404, detail="سفارش یافت نشد")
-    
-    items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
-    
-    items_list = [
-        {
-            "id": item.id,
-            "product_title": item.product_title,
-            "product_code": item.product_code,
-            "quantity": item.quantity,
-            "price": item.price,
-            "product_image": item.product_image
-        }
-        for item in items
-    ]
-    
-    total_quantity = sum(item.quantity for item in items)
-    total_amount = sum(item.price * item.quantity for item in items)
-    
-    return {
-        "id": order.id,
-        "order_code": order.order_code,
-        "shipment_id": order.shipment_id,
-        "customer_name": order.customer_name,
-        "customer_phone": order.customer_phone,
-        "status": order.status,
-        "city": order.city,
-        "province": order.province,
-        "full_address": order.full_address,
-        "postal_code": order.postal_code,
-        "tracking_code": order.tracking_code,
-        "order_date_persian": order.order_date_persian,
-        "items": items_list,
-        "items_count": len(items),
-        "total_quantity": total_quantity,
-        "total_amount": total_amount
-    }
-
 # ==================== اجرا ====================
 if __name__ == "__main__":
     import uvicorn
@@ -303,7 +207,9 @@ if __name__ == "__main__":
     print("📍 Endpoints:")
     print("   - http://localhost:8000/")
     print("   - http://localhost:8000/docs")
+    print("   - http://localhost:8000/api/auth/login")
     print("   - http://localhost:8000/api/orders")
+    print("   - http://localhost:8000/api/warehouse/products")
     print("   - http://localhost:8000/api/tracking/test")
     print("   - http://localhost:8000/api/labels/test-font")
     print()
