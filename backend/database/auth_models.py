@@ -90,7 +90,7 @@ class User(Base):
     
     # Relations
     roles = relationship("Role", secondary=user_roles, back_populates="users")
-    created_orders = relationship("Order", foreign_keys="Order.created_by", back_populates="creator")
+    created_orders = relationship("Order", foreign_keys="[Order.created_by]", back_populates="creator", lazy="dynamic")
     
     def has_permission(self, permission: str) -> bool:
         """چک کردن اینکه آیا کاربر مجوز خاصی دارد"""

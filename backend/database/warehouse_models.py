@@ -369,20 +369,6 @@ class PurchaseOrderItem(Base):
     product = relationship("WarehouseProduct")
 
 
-# ==================== به‌روزرسانی Order برای ارتباط با انبار ====================
-from database.models import Order
-
-# اضافه کردن ستون‌های جدید به Order
-Order.created_by = Column(Integer, ForeignKey('users.id'))
-Order.warehouse_id = Column(Integer, ForeignKey('warehouses.id'))
-Order.is_warehouse_dispatched = Column(Boolean, default=False)
-Order.dispatch_date = Column(DateTime)
-
-# Relations
-Order.creator = relationship("User", foreign_keys="Order.created_by", back_populates="created_orders")
-Order.warehouse = relationship("Warehouse")
-
-
 # ==================== توابع کمکی ====================
 
 def generate_transaction_number() -> str:

@@ -13,8 +13,8 @@ class Order(Base):
     __tablename__ = 'orders'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    order_code = Column(String(50), unique=True, nullable=False, index=True)  # کد سفارش
-    shipment_id = Column(String(50), unique=True, nullable=False, index=True)  # شناسه محموله
+    order_code = Column(String(50), unique=True, nullable=False, index=True)
+    shipment_id = Column(String(50), unique=True, nullable=False, index=True)
     customer_name = Column(String(200))
     customer_phone = Column(String(20))
     status = Column(String(100))
@@ -34,9 +34,17 @@ class Order(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # ارتباط با کاربر و انبار (nullable=True برای سازگاری با داده‌های قدیمی)
+    created_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    warehouse_id = Column(Integer, ForeignKey('warehouses.id'), nullable=True)
+    is_warehouse_dispatched = Column(Boolean, default=False)
+    dispatch_date = Column(DateTime, nullable=True)
+    
     # Relations
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     sms_logs = relationship("SMSLog", back_populates="order", cascade="all, delete-orphan")
+    creator = relationship("User", foreign_keys=[created_by], back_populates="created_orders")
+    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
 
 
 class OrderItem(Base):
@@ -47,7 +55,7 @@ class OrderItem(Base):
     order_id = Column(Integer, ForeignKey('orders.id'), nullable=False)
     
     product_title = Column(String(500))
-    product_code = Column(String(100))  # DKP
+    product_code = Column(String(100))
     product_image = Column(Text)
     quantity = Column(Integer, default=1)
     price = Column(Float, default=0)
@@ -85,7 +93,7 @@ class SenderProfile(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# ============= بخش انبار (برای آینده) =============
+# ============= بخش انبار =============
 
 class Warehouse(Base):
     """انبارها"""
@@ -113,7 +121,7 @@ class Product(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# ============= بخش حسابداری (برای آینده) =============
+# ============= بخش حسابداری =============
 
 class Invoice(Base):
     """فاکتورها"""
@@ -124,7 +132,7 @@ class Invoice(Base):
     order_id = Column(Integer, ForeignKey('orders.id'))
     total_amount = Column(Float, default=0)
     paid_amount = Column(Float, default=0)
-    payment_status = Column(String(50))  # پرداخت_شده، پرداخت_نشده، نیمه_پرداخت
+    payment_status = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -132,7 +140,7 @@ class Invoice(Base):
 
 def init_database(db_path="sales.db"):
     """ایجاد دیتابیس و جداول"""
-    engine = create_engine(f'sqlite:///{db_path}', echo=True)
+    engine = create_engine(f'sqlite:///{db_path}', echo=False)
     Base.metadata.create_all(engine)
     return engine
 
@@ -143,9 +151,7 @@ def get_session(engine):
     return Session()
 
 
-# مثال استفاده:
 if __name__ == "__main__":
-    # ایجاد دیتابیس
     engine = init_database("digikala_sales.db")
     session = get_session(engine)
     
