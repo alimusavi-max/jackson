@@ -4,6 +4,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from database.models import Base
 import enum
+import hashlib
 
 # جدول رابطه چند به چند بین کاربر و نقش
 user_roles = Table(
@@ -317,10 +318,18 @@ def create_default_roles(session):
 
 
 def create_superuser(session, username: str, email: str, password: str, full_name: str):
-    """ایجاد کاربر ادمین اولیه"""
+    """ایجاد کاربر ادمین اولیه با حل مشکل bcrypt"""
     from passlib.context import CryptContext
     
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    
+    # ✅ حل مشکل bcrypt با محدودیت 72 بایت
+    password_bytes = password.encode('utf-8')
+    
+    # اگر رمز عبور بیش از 72 بایت باشد، ابتدا SHA-256 بزنیم
+    if len(password_bytes) > 72:
+        print("⚠️ رمز عبور بیش از 72 بایت است - استفاده از SHA-256...")
+        password = hashlib.sha256(password_bytes).hexdigest()
     
     user = session.query(User).filter_by(username=username).first()
     if not user:

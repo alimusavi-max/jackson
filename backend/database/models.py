@@ -40,9 +40,10 @@ class Order(Base):
     is_warehouse_dispatched = Column(Boolean, default=False)
     dispatch_date = Column(DateTime, nullable=True)
     
-    # Relations
+    # Relations - 🔥 از string استفاده کن تا circular import نداشته باشیم
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     sms_logs = relationship("SMSLog", back_populates="order", cascade="all, delete-orphan")
+    # 🔥 مهم: از string استفاده کن
     creator = relationship("User", foreign_keys=[created_by], back_populates="created_orders")
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
 
