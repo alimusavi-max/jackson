@@ -34,6 +34,7 @@ export default function LabelsPage() {
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   
   // تنظیمات
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait')
@@ -54,7 +55,7 @@ export default function LabelsPage() {
     dateTo: ''
   })
 
-  // 🔥 پروفایل‌های فرستنده - با localStorage
+  // پروفایل‌های فرستنده
   const [senderProfiles, setSenderProfiles] = useState<Record<string, SenderProfile>>({})
   const [selectedProfile, setSelectedProfile] = useState<string>('default')
   const [currentSender, setCurrentSender] = useState<SenderProfile>({
@@ -71,7 +72,7 @@ export default function LabelsPage() {
     loadProfilesFromStorage()
   }, [])
 
-  // 🔥 بارگذاری پروفایل‌ها از localStorage
+  // بارگذاری پروفایل‌ها از localStorage
   const loadProfilesFromStorage = () => {
     try {
       const saved = localStorage.getItem('sender_profiles')
@@ -79,12 +80,10 @@ export default function LabelsPage() {
         const profiles = JSON.parse(saved)
         setSenderProfiles(profiles)
         
-        // اگر پروفایل default وجود داشت، آن را بارگذاری کن
         if (profiles.default) {
           setCurrentSender(profiles.default)
         }
       } else {
-        // اگر هیچ پروفایلی نبود، یک پروفایل پیش‌فرض ایجاد کن
         const defaultProfiles = {
           'default': {
             name: '',
@@ -101,7 +100,7 @@ export default function LabelsPage() {
     }
   }
 
-  // 🔥 ذخیره پروفایل‌ها در localStorage
+  // ذخیره پروفایل‌ها در localStorage
   const saveProfilesToStorage = (profiles: Record<string, SenderProfile>) => {
     try {
       localStorage.setItem('sender_profiles', JSON.stringify(profiles))
@@ -113,17 +112,27 @@ export default function LabelsPage() {
   const loadOrders = async () => {
     try {
       setLoading(true)
+      setError(null)
       const res = await ordersAPI.getAll({ limit: 1000 })
-      setOrders(res.data)
+      
+      // اطمینان از اینکه data یک آرایه است
+      if (res && Array.isArray(res.data)) {
+        setOrders(res.data)
+      } else {
+        console.error('پاسخ نامعتبر:', res)
+        setOrders([])
+        setError('فرمت داده نامعتبر است')
+      }
     } catch (error) {
       console.error('خطا:', error)
-      alert('خطا در دریافت سفارشات')
+      setOrders([])
+      setError('خطا در دریافت سفارشات')
     } finally {
       setLoading(false)
     }
   }
 
-  // 🔥 ذخیره پروفایل جدید
+  // ذخیره پروفایل جدید
   const saveProfile = () => {
     if (!newProfileName.trim()) {
       alert('⚠️ لطفاً نام پروفایل را وارد کنید')
@@ -147,7 +156,7 @@ export default function LabelsPage() {
     alert(`✅ پروفایل "${newProfileName}" ذخیره شد`)
   }
 
-  // 🔥 حذف پروفایل
+  // حذف پروفایل
   const deleteProfile = (profileName: string) => {
     if (profileName === 'default') {
       alert('⚠️ نمی‌توانید پروفایل پیش‌فرض را حذف کنید')
@@ -172,7 +181,7 @@ export default function LabelsPage() {
     alert(`✅ پروفایل "${profileName}" حذف شد`)
   }
 
-  // 🔥 انتخاب پروفایل
+  // انتخاب پروفایل
   const selectProfile = (profileName: string) => {
     setSelectedProfile(profileName)
     if (profileName && senderProfiles[profileName]) {
@@ -296,7 +305,8 @@ export default function LabelsPage() {
     }
   }
 
-  const filteredOrders = orders.filter(order => {
+  // اطمینان از اینکه orders یک آرایه است قبل از filter
+  const filteredOrders = Array.isArray(orders) ? orders.filter(order => {
     if (filters.search) {
       const search = filters.search.toLowerCase()
       if (
@@ -324,11 +334,11 @@ export default function LabelsPage() {
     }
 
     return true
-  })
+  }) : []
 
-  const cities = Array.from(new Set(orders.map(o => o.city).filter(Boolean))).sort()
-  const provinces = Array.from(new Set(orders.map(o => o.province).filter(Boolean))).sort()
-  const statuses = Array.from(new Set(orders.map(o => o.status).filter(Boolean))).sort()
+  const cities = Array.isArray(orders) ? Array.from(new Set(orders.map(o => o.city).filter(Boolean))).sort() : []
+  const provinces = Array.isArray(orders) ? Array.from(new Set(orders.map(o => o.province).filter(Boolean))).sort() : []
+  const statuses = Array.isArray(orders) ? Array.from(new Set(orders.map(o => o.status).filter(Boolean))).sort() : []
 
   if (loading) {
     return (
@@ -336,6 +346,27 @@ export default function LabelsPage() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600 text-lg">در حال بارگذاری...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100" dir="rtl">
+        <div className="text-center max-w-md">
+          <div className="bg-red-50 border-2 border-red-200 rounded-xl p-8">
+            <AlertCircle className="text-red-500 mx-auto mb-4" size={64} />
+            <h2 className="text-2xl font-bold text-red-900 mb-2">خطا در بارگذاری</h2>
+            <p className="text-red-700 mb-6">{error}</p>
+            <button
+              onClick={loadOrders}
+              className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium flex items-center gap-2 mx-auto"
+            >
+              <RefreshCw size={20} />
+              تلاش مجدد
+            </button>
+          </div>
         </div>
       </div>
     )
