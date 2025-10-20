@@ -91,22 +91,9 @@ class SenderProfile(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# ============= بخش انبار =============
-
-class Warehouse(Base):
-    """انبارها"""
-    __tablename__ = 'warehouses'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(200), nullable=False)
-    location = Column(String(500))
-    manager_name = Column(String(200))
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
 class Product(Base):
     """محصولات موجود در انبار"""
-    __tablename__ = 'products'
+    __tablename__ = 'products_old'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     dkp_code = Column(String(100), unique=True, index=True)

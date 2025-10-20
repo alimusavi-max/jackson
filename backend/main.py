@@ -7,12 +7,20 @@ from sqlalchemy.orm import sessionmaker
 from typing import List, Optional
 import os
 import sys
-# در قسمت imports بعد از sys.path.insert
-from database.models import Order, OrderItem
-from database.auth_models import User  # این رو اضافه کن
+
+# اضافه کردن backend به path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from database.models import Order, OrderItem, SenderProfile, SMSLog, Base
+# ==================== Import همه Models ====================
+from database.models import Order, OrderItem, Base
+from database.auth_models import User
+
+# 🔥 CRITICAL: Import کردن تمام مدل‌های warehouse برای register شدن در Base
+from database.warehouse_models_extended import (
+    Warehouse, WarehouseProduct, ProductCategory,
+    Marketplace, ProductMarketplace, InventoryTransaction,
+    StockTake, StockTakeItem
+)
 
 # ==================== تنظیمات دیتابیس ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,13 +35,17 @@ print(f"{'='*60}\n")
 engine = create_engine(f'sqlite:///{DB_PATH_ABS}', echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# 🔥 ایجاد تمام جداول (شامل warehouse)
+print("🔨 ایجاد جداول...")
 Base.metadata.create_all(bind=engine)
+print("✅ تمام جداول ایجاد شدند\n")
 
 def test_db():
     db = SessionLocal()
     try:
         count = db.query(Order).count()
-        print(f"✅ تست دیتابیس: {count} سفارش یافت شد")
+        warehouse_count = db.query(Warehouse).count()
+        print(f"✅ تست دیتابیس: {count} سفارش، {warehouse_count} انبار")
         return count
     except Exception as e:
         print(f"❌ خطا در تست دیتابیس: {e}")
@@ -68,23 +80,21 @@ def get_db():
 # ==================== Include Routers ====================
 print("\n🔧 در حال بارگذاری Routers...")
 
-# 🔐 Auth Router (باید اول باشد)
+# 🔐 Auth Router
 try:
     from routers import auth
     app.include_router(auth.router, prefix="/api")
-    print("✅ auth router loaded at /api/auth")
+    print("✅ auth router loaded")
 except Exception as e:
-    print(f"❌ خطا در بارگذاری auth router: {e}")
-    import traceback
-    traceback.print_exc()
+    print(f"❌ auth router: {e}")
 
 # 📦 Warehouse Router
 try:
     from routers import warehouse
     app.include_router(warehouse.router, prefix="/api")
-    print("✅ warehouse router loaded at /api/warehouse")
+    print("✅ warehouse router loaded")
 except Exception as e:
-    print(f"❌ خطا در بارگذاری warehouse router: {e}")
+    print(f"❌ warehouse router: {e}")
     import traceback
     traceback.print_exc()
 
@@ -92,41 +102,33 @@ except Exception as e:
 try:
     from routers import orders
     app.include_router(orders.router, prefix="/api", tags=["orders"])
-    print("✅ orders router loaded at /api/orders")
+    print("✅ orders router loaded")
 except Exception as e:
-    print(f"❌ خطا در بارگذاری orders router: {e}")
-    import traceback
-    traceback.print_exc()
+    print(f"❌ orders router: {e}")
 
 # 📋 Labels Router
 try:
     from routers import labels
     app.include_router(labels.router, prefix="/api", tags=["labels"])
-    print("✅ labels router loaded at /api/labels")
+    print("✅ labels router loaded")
 except Exception as e:
-    print(f"❌ خطا در بارگذاری labels router: {e}")
-    import traceback
-    traceback.print_exc()
+    print(f"❌ labels router: {e}")
 
 # 📮 Tracking Router
 try:
     from routers import tracking
     app.include_router(tracking.router, prefix="/api", tags=["tracking"])
-    print("✅ tracking router loaded at /api/tracking")
+    print("✅ tracking router loaded")
 except Exception as e:
-    print(f"❌ خطا در بارگذاری tracking router: {e}")
-    import traceback
-    traceback.print_exc()
+    print(f"❌ tracking router: {e}")
 
 # 📤 Sender Profiles Router
 try:
     from routers import sender_profiles
     app.include_router(sender_profiles.router, prefix="/api", tags=["sender-profiles"])
-    print("✅ sender_profiles router loaded at /api/sender-profiles")
+    print("✅ sender_profiles router loaded")
 except Exception as e:
-    print(f"❌ خطا در بارگذاری sender_profiles router: {e}")
-    import traceback
-    traceback.print_exc()
+    print(f"❌ sender_profiles router: {e}")
 
 print("✅ تمام routers بارگذاری شدند\n")
 
@@ -135,9 +137,13 @@ print("✅ تمام routers بارگذاری شدند\n")
 def root():
     db = SessionLocal()
     try:
-        count = db.query(Order).count()
+        orders_count = db.query(Order).count()
+        warehouses_count = db.query(Warehouse).count()
+        products_count = db.query(WarehouseProduct).count()
     except:
-        count = 0
+        orders_count = 0
+        warehouses_count = 0
+        products_count = 0
     finally:
         db.close()
     
@@ -146,11 +152,15 @@ def root():
         "status": "running",
         "db_path": DB_PATH_ABS,
         "db_exists": os.path.exists(DB_PATH_ABS),
-        "orders_count": count,
+        "stats": {
+            "orders": orders_count,
+            "warehouses": warehouses_count,
+            "products": products_count
+        },
         "features": {
             "auth": "✓ کاربران و نقش‌ها",
             "sales": "✓ مدیریت فروش",
-            "warehouse": "✓ انبارداری",
+            "warehouse": "✓ انبارداری چند انباره",
             "labels": "✓ برچسب پستی",
             "tracking": "✓ کد رهگیری",
             "sms": "✓ پیامک"
@@ -159,6 +169,7 @@ def root():
             "auth": "/api/auth/login",
             "orders": "/api/orders",
             "warehouse": "/api/warehouse/products",
+            "warehouses": "/api/warehouse/warehouses",
             "labels": "/api/labels",
             "tracking": "/api/tracking",
             "docs": "/docs"
@@ -185,21 +196,34 @@ def get_stats(db: Session = Depends(get_db)):
         
         unique_cities = db.query(func.count(func.distinct(Order.city))).scalar()
         
+        # آمار انبار
+        total_warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).count()
+        total_products = db.query(WarehouseProduct).filter(WarehouseProduct.is_active == True).count()
+        total_stock = db.query(func.sum(WarehouseProduct.stock_quantity)).scalar() or 0
+        
         return {
-            "total_orders": total_orders,
-            "orders_with_tracking": orders_with_tracking,
-            "orders_without_tracking": total_orders - orders_with_tracking,
-            "total_sales": total_sales,
-            "unique_cities": unique_cities,
-            "completion_rate": round((orders_with_tracking / total_orders * 100), 2) if total_orders > 0 else 0
+            "sales": {
+                "total_orders": total_orders,
+                "orders_with_tracking": orders_with_tracking,
+                "orders_without_tracking": total_orders - orders_with_tracking,
+                "total_sales": total_sales,
+                "unique_cities": unique_cities,
+                "completion_rate": round((orders_with_tracking / total_orders * 100), 2) if total_orders > 0 else 0
+            },
+            "warehouse": {
+                "total_warehouses": total_warehouses,
+                "total_products": total_products,
+                "total_stock": total_stock
+            }
         }
     except Exception as e:
+        print(f"❌ خطا در آمار: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             "error": str(e),
-            "total_orders": 0,
-            "orders_with_tracking": 0,
-            "orders_without_tracking": 0,
-            "total_sales": 0
+            "sales": {"total_orders": 0},
+            "warehouse": {"total_warehouses": 0}
         }
 
 # ==================== اجرا ====================
@@ -212,7 +236,6 @@ if __name__ == "__main__":
     print("   - http://localhost:8000/api/auth/login")
     print("   - http://localhost:8000/api/orders")
     print("   - http://localhost:8000/api/warehouse/products")
-    print("   - http://localhost:8000/api/tracking/test")
-    print("   - http://localhost:8000/api/labels/test-font")
+    print("   - http://localhost:8000/api/warehouse/warehouses")
     print()
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
